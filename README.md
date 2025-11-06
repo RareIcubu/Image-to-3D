@@ -1,251 +1,290 @@
-📸 Projekt: Konwerter Obrazu 2D do 3D
+---
 
-Repozytorium projektu na przedmiot "Grafika i GUI". Jest to aplikacja desktopowa w C++/Qt6, która wykorzystuje Docker do stworzenia spójnego środowiska deweloperskiego.
+# 📸 Projekt: Konwerter Obrazu 2D do 3D
 
-🚀 Stos technologiczny
+Repozytorium projektu na przedmiot **Grafika i GUI**.
+Aplikacja desktopowa w **C++/Qt6**, korzystająca z **Docker** do stworzenia spójnego środowiska deweloperskiego.
 
-    Język: C++ (17/20)
+---
 
-    GUI: Qt 6
+## 📑 Spis treści
 
-    Przetwarzanie obrazu: OpenCV
+1. [🚀 Stos technologiczny](#-stos-technologiczny)
+2. [🛠️ Jak zacząć pracę (Środowisko deweloperskie)](#️-1-jak-zacząć-pracę-środowisko-deweloperskie)
 
-    Budowanie: CMake + Ninja
+   * [Wymagania wstępne](#wymagania-wstępne)
+   * [Konfiguracja wyświetlania GUI](#-konfiguracja-wyświetlania-gui-krytyczne)
+   * [Uruchomienie środowiska](#-uruchomienie-środowiska)
+3. [💻 Codzienny cykl pracy (Workflow)](#-2-codzienny-cykl-pracy-workflow)
 
-    Środowisko: Docker + Docker Compose (na bazie Ubuntu 22.04)
+   * [Praca z Qt Creator + Docker](#-praca-z-qt-creator--docker)
+   * [Pierwsze uruchomienie](#-pierwsze-uruchomienie-kompilacja)
+   * [Zatrzymywanie pracy](#-zatrzymywanie-pracy)
+4. [📦 Wersjonowanie i wydania (Releases)](#-3-wersjonowanie-i-wydania-releases)
+5. [📁 Struktura projektu](#-4-struktura-projektu)
+6. [🎓 Jak uruchomić gotową aplikację (Dla prowadzącego)](#-5-jak-uruchomić-gotową-aplikację-dla-prowadzącego)
 
-    Kontrola wersji: Git + GitHub
+---
 
-🛠️ 1. Jak zacząć pracę (Środowisko deweloperskie)
+## 🚀 Stos technologiczny
 
-Celem jest praca w kontenerze dev. Kontener ten ma już zainstalowane wszystkie zależności (C++, Qt, OpenCV, CMake). Ty piszesz kod na swoim komputerze, a kompilujesz go "wewnątrz" kontenera.
+| Komponent                | Technologia                            |
+| ------------------------ | -------------------------------------- |
+| **Język**                | C++ (C++17 / C++20)                    |
+| **GUI**                  | Qt 6                                   |
+| **Przetwarzanie obrazu** | OpenCV                                 |
+| **Budowanie**            | CMake + Ninja                          |
+| **Środowisko**           | Docker + Docker Compose (Ubuntu 22.04) |
+| **Kontrola wersji**      | Git + GitHub                           |
 
-Wymagania wstępne
+---
 
-    Git (do pobrania kodu)
+## 🛠️ 1. Jak zacząć pracę (Środowisko deweloperskie)
 
-    Docker i Docker Compose (na Linuksie) lub Docker Desktop (na Windows/macOS).
+Kontener **dev** zawiera wszystkie potrzebne zależności (C++, Qt, OpenCV, CMake).
+Kod edytujesz lokalnie, a kompilacja odbywa się **wewnątrz kontenera**.
 
-    (Konieczne do GUI) Konfiguracja wyświetlania opisana poniżej.
+---
 
-Konfiguracja wyświetlania GUI (Krytyczne!)
+### Wymagania wstępne
 
-Nasz kontener to Linux, ale musi wyświetlać okna na Twoim komputerze (Windows, Linux, Mac). Wymaga to jednorazowej konfiguracji.
+* **Git** — pobranie repozytorium
+* **Docker** i **Docker Compose** (Linux) lub **Docker Desktop** (Windows/macOS)
+* **Konfiguracja wyświetlania GUI** (patrz niżej)
 
-    Na Windows:
+---
 
-        Pobierz i zainstaluj serwer X11, np. VcXsrv: https://sourceforge.net/projects/vcxsrv/
+### 🖥️ Konfiguracja wyświetlania GUI (krytyczne)
 
-        Uruchom XLaunch (z menu Start).
+Kontener to system **Linux**, ale musi wyświetlać okna na Twoim komputerze.
 
-        Przejdź przez kreator: Multiple windows ➔ Start no client.
+#### 🔹 Windows
 
-        Na ekranie "Extra settings" koniecznie zaznacz "Disable access control". To kluczowe, aby Docker mógł się połączyć.
+1. Pobierz i zainstaluj [**VcXsrv**](https://sourceforge.net/projects/vcxsrv/).
+2. Uruchom **XLaunch**:
 
-        Zakończ kreator. Ikona VcXsrv pojawi się w zasobniku systemowym – serwer jest gotowy.
+   * *Multiple windows*
+   * *Start no client*
+   * W zakładce *Extra settings* → zaznacz **Disable access control**
+3. Po uruchomieniu ikona VcXsrv powinna być widoczna w zasobniku systemowym.
 
-    Na Linuksie (jeśli używasz Docker Desktop): Jeśli przy próbie uruchomienia kontenera (docker-compose up...) dostaniesz błąd mounts denied: /tmp/.X11-unix, musisz ręcznie dodać tę ścieżkę do Docker Desktop:
+#### 🔹 Linux (Docker Desktop)
 
-        Otwórz Docker Desktop > Settings (Ustawienia).
+Jeśli przy starcie pojawia się błąd:
 
-        Idź do Resources > File Sharing.
+```
+mounts denied: /tmp/.X11-unix
+```
 
-        Kliknij + i dodaj ścieżkę /tmp/.X11-unix.
+dodaj ścieżkę ręcznie:
 
-        Kliknij Apply & Restart.
+1. Otwórz **Docker Desktop → Settings → Resources → File Sharing**
+2. Kliknij `+` i dodaj `/tmp/.X11-unix`
+3. Kliknij **Apply & Restart**
 
-Uruchomienie środowiska
+---
 
-Otwórz terminal w głównym folderze projektu (tam, gdzie jest ten plik README).
+### 🚀 Uruchomienie środowiska
 
-A. Jeśli jesteś na Linuksie:
-Bash
+W terminalu w folderze głównym projektu:
 
-# Uruchamia kontener w tle i go buduje (jeśli trzeba)
+#### Linux
+
+```bash
 docker-compose -f docker-compose.yml -f compose-linux.yml up -d --build
+```
 
-B. Jeśli jesteś na Windows (z uruchomionym VcXsrv):
-Bash
+#### Windows (z działającym VcXsrv)
 
-# Używamy innego pliku konfiguracyjnego do GUI
+```bash
 docker-compose -f docker-compose.yml -f compose-windows.yml up -d --build
+```
 
-💻 2. Codzienny cykl pracy (Twój Workflow)
+---
+
+## 💻 2. Codzienny cykl pracy (Workflow)
 
 Będziesz pracować w dwóch oknach:
 
-    W oknie Edytora Kodu (np. VS Code, Qt Creator, CLion) otwartym na folderze src/ na Twoim komputerze.
+1. **Edytor kodu** — np. VS Code, Qt Creator lub CLion (folder `src/`)
+2. **Terminal** — połączony z kontenerem:
 
-    W oknie Terminala połączonym z wnętrzem kontenera.
+   ```bash
+   docker-compose exec dev bash
+   ```
 
-🖥️ Praca z Qt Creator + Docker (Nasz Workflow)
+---
 
-Nie możesz po prostu kliknąć "Run" (zielonej strzałki) w Qt Creatorze, ponieważ nie ma on dostępu do zależności wewnątrz kontenera. Nasz przepływ pracy opiera się na dwóch programach:
+### 🖥️ Praca z Qt Creator + Docker
 
-    Qt Creator (jako Edytor Tekstu):
+Qt Creator działa jako **edytor**, a kompilacja i uruchamianie odbywają się **w kontenerze**.
 
-        Uruchom Qt Creator normalnie na swoim komputerze.
+#### Qt Creator
 
-        Otwórz projekt przez Plik > Otwórz Projekt i wskaż plik src/CMakeLists.txt.
+1. Uruchom lokalnie.
+2. Otwórz projekt: `Plik → Otwórz Projekt → src/CMakeLists.txt`
+3. Zignoruj błędy dotyczące „Kit” – nie będą używane.
 
-        Qt Creator zapyta o "Kit" (Zestaw). Możesz zignorować błędy lub wybrać dowolny zestaw. Będziemy go używać tylko do pisania kodu i nawigacji, nie do kompilacji.
+#### Terminal (kompilacja)
 
-    Terminal (jako Kompilator i Uruchamiacz):
+1. Po zapisaniu zmian w Qt Creatorze:
 
-        Miej otwarty terminal, w którym jesteś "wewnątrz" kontenera (docker-compose exec dev bash).
+   ```bash
+   cd /app/src/build
+   ninja
+   ./TwojaAplikacja
+   ```
+2. Aplikacja otworzy się na Twoim pulpicie.
 
-        Gdy napiszesz kod w Qt Creatorze i go zapiszesz, przejdź do tego terminala.
+---
 
-Cykl wygląda tak:
+### 🧱 Pierwsze uruchomienie (kompilacja)
 
-    Piszesz kod w Qt Creatorze (np. dodajesz nowy przycisk) i zapisujesz plik.
-
-    Przełączasz się do Terminala (będąc w /app/src/build).
-
-    Kompilujesz zmiany: ninja
-
-    Uruchamiasz aplikację: ./TwojaAplikacja
-
-    Okno aplikacji pojawia się na Twoim pulpicie. Testujesz. Wracasz do pkt 1.
-
-Pierwsze uruchomienie (Kompilacja)
-
-Gdy uruchamiasz projekt po raz pierwszy (lub po git pull, gdy ktoś zmienił CMakeLists.txt):
-Bash
-
-# Wejdź do terminala kontenera
+```bash
+# Wejdź do kontenera
 docker-compose exec dev bash
 
-# Będąc w /app, przejdź do kodu
-cd src
+# Przejdź do katalogu źródłowego
+cd /app/src
 
-# Stwórz folder budowania (tylko raz)
-mkdir build
-cd build
+# Stwórz folder build
+mkdir build && cd build
 
-# Uruchom CMake (tylko raz)
+# Konfiguracja CMake
 cmake .. -GNinja
 
-# Skompiluj wszystko (pierwszy raz potrwa dłużej)
+# Kompilacja
 ninja
+```
 
-Zatrzymywanie pracy
+---
 
-Gdy kończysz pracę, zamknij aplikację i w terminalu na swoim komputerze (nie w kontenerze) wpisz:
-Bash
+### 📴 Zatrzymywanie pracy
 
+Po zakończeniu sesji:
+
+```bash
 docker-compose down
+```
 
-📦 3. Wersjonowanie i Wydania (Releases)
+---
 
-Tworzenie "wydania" to ręczny proces składający się z 3 kroków:
+## 📦 3. Wersjonowanie i wydania (Releases)
 
-    Budowa i publikacja obrazu Docker.
+Tworzenie wydania składa się z trzech kroków:
 
-    Tagowanie kodu w Git.
+1. 🔧 Zmiana wersji w kodzie
+2. 🐳 Budowa i publikacja obrazu Docker
+3. 🏷️ Tagowanie i release na GitHubie
 
-    Stworzenie strony "Release" na GitHubie.
+---
 
-Jak stworzyć nową wersję (np. v1.1.0)
+### 🔹 Krok 1: Zmiana wersji
 
-Krok 1: Zmień wersję w kodzie
+W pliku `src/CMakeLists.txt`:
 
-    Otwórz plik src/CMakeLists.txt.
+```cmake
+project(TwojaAplikacja VERSION 1.1.0 ...)
+```
 
-    Zmień numer wersji w linii project(TwojaAplikacja VERSION 1.0.1 ...). Na przykład na 1.1.0.
+Zatwierdź:
 
-    Zatwierdź tę zmianę w Git: git commit -m "Bump version to 1.1.0" i git push.
+```bash
+git commit -am "Bump version to 1.1.0"
+git push
+```
 
-Krok 2: Zbuduj i wypchnij obraz Docker Będziesz potrzebować konta na rejestrze kontenerów (np. Docker Hub lub GitHub Container Registry (GHCR)).
+---
 
-    Zbuduj obraz produkcyjny:
-    Bash
+### 🔹 Krok 2: Budowa i publikacja obrazu Docker
 
-# Buduje etap 'final' z Dockerfile i nadaje mu nazwę
+```bash
 docker build -t moj-obraz-prod --target final .
-
-Zaloguj się (np. do Docker Hub):
-Bash
-
 docker login
-
-Otaguj obraz (zmień twojanazwa na swój login):
-Bash
-
 docker tag moj-obraz-prod twojanazwa/image-to-3d:1.1.0
+docker push twojanazwa/image-to-3d:1.1.0
+```
 
-Wypchnij obraz do rejestru:
-Bash
+---
 
-    docker push twojanazwa/image-to-3d:1.1.0
+### 🔹 Krok 3: Tag i Release na GitHubie
 
-Krok 3: Stwórz Tag Git i Release na GitHubie
+```bash
+git tag v1.1.0
+git push origin v1.1.0
+```
 
-    Stwórz tag Git pasujący do wersji obrazu i wypchnij go:
-    Bash
+Na GitHubie:
 
-    git tag v1.1.0
-    git push origin v1.1.0
+1. Otwórz **Releases → Draft a new release**
+2. Wybierz tag `v1.1.0`
+3. W opisie dodaj instrukcję uruchamiania (sekcja 5)
 
-    Idź na GitHub do swojego repozytorium i kliknij "Releases" po prawej stronie.
+---
 
-    Kliknij "Draft a new release".
+## 📁 4. Struktura projektu
 
-    Wybierz tag v1.1.0, który właśnie wypchnąłeś.
-
-    W opisie koniecznie wklej instrukcję uruchamiania dla użytkownika końcowego (patrz Sekcja 5).
-
-📁 4. Struktura Projektu
-
+```
 .
-├── .git/                # Pliki Gita
-├── .gitignore           # Mówi Gitowi, co ignorować (WAŻNE: ignoruje src/build/)
-├── Dockerfile           # PRZEPIS na obraz (dev i prod, multi-stage)
-├──
-├── docker-compose.yml   # Plik bazowy dla środowiska DEV
-├── compose-linux.yml    # Ustawienia GUI dla Linuksa (dla DEV)
-├── compose-windows.yml  # Ustawienia GUI dla Windows (dla DEV)
-├──
-├── docker-compose.prod.yml   # Plik bazowy dla środowiska PROD (dla użytkownika)
-├── compose-prod-linux.yml    # Ustawienia GUI dla Linuksa (dla PROD)
-├── compose-prod-windows.yml  # Ustawienia GUI dla Windows (dla PROD)
-├──
-├── README.md            # Ten plik :)
+├── .git/
+├── .gitignore                # Ignoruje m.in. src/build/
+├── Dockerfile                # Multi-stage build (dev + prod)
+│
+├── docker-compose.yml        # Bazowy plik DEV
+├── compose-linux.yml         # GUI dla Linuksa (DEV)
+├── compose-windows.yml       # GUI dla Windows (DEV)
+│
+├── docker-compose.prod.yml   # Bazowy plik PROD
+├── compose-prod-linux.yml    # GUI dla Linuksa (PROD)
+├── compose-prod-windows.yml  # GUI dla Windows (PROD)
+│
+├── README.md
 └── src/
-    ├── CMakeLists.txt   # Główny plik budowania C++ (tu dodajesz nowe pliki .cpp)
-    ├── config.h.in      # Szablon wersji dla C++
-    ├── main.cpp         # Główny plik aplikacji
-    └── build/           # (IGNOROWANY PRZEZ GIT) Tu odbywa się kompilacja
+    ├── CMakeLists.txt
+    ├── config.h.in
+    ├── main.cpp
+    └── build/                # Ignorowany przez Git
+```
 
-🎓 5. Jak Uruchomić Gotową Aplikację (Dla Prowadzącego)
+---
 
-Ta sekcja jest przeznaczona dla użytkownika końcowego, który chce tylko uruchomić gotowy program bez pobierania kodu źródłowego. Obraz jest publikowany ręcznie i dostępny w rejestrze kontenerów.
+## 🎓 5. Jak uruchomić gotową aplikację (Dla prowadzącego)
 
-Wymagania
+Sekcja dla użytkownika końcowego, który chce **uruchomić aplikację bez kompilacji**.
 
-    Zainstalowany Docker Desktop (dla Windows/Mac) lub Docker (dla Linux).
+---
 
-    (Tylko Windows) Zainstalowany i uruchomiony VcXsrv z opcją "Disable access control" (patrz instrukcja w Sekcji 1).
+### Wymagania
 
-Instrukcja Uruchomienia
+* **Docker Desktop** (Windows/Mac) lub **Docker** (Linux)
+* (Windows) Uruchomiony **VcXsrv** z opcją *Disable access control*
 
-Otwórz terminal (PowerShell na Windows) i wklej jedną komendę odpowiednią dla Twojego systemu. Docker automatycznie pobierze i uruchomi aplikację.
+---
 
-    Uwaga: Poniższy adres URL (twojanazwa/image-to-3d:latest) jest przykładem. Prawidłową komendę do uruchomienia znajdziesz w opisie najnowszego "Release'u" w zakładce "Releases" na stronie tego repozytorium.
+### 🔹 Uruchomienie aplikacji
 
-A. Uruchomienie na Linuksie (Przykład):
-Bash
+W terminalu (PowerShell/Bash) wklej komendę odpowiednią dla systemu.
+Docker sam pobierze obraz i uruchomi aplikację.
 
+> ⚠️ Prawidłowy tag obrazu znajdziesz w opisie najnowszego **Release** na GitHubie.
+
+#### Linux
+
+```bash
 docker run -it --rm \
     -e DISPLAY=$DISPLAY \
     -v /tmp/.X11-unix:/tmp/.X11-unix \
     twojanazwa/image-to-3d:latest
+```
 
-B. Uruchomienie na Windows (Przykład, z działającym VcXsrv):
-Bash
+#### Windows
 
+```bash
 docker run -it --rm \
     -e DISPLAY=host.docker.internal:0.0 \
     twojanazwa/image-to-3d:latest
+```
 
-Aplikacja powinna pojawić się na ekranie po kilku sekundach.
+Po kilku sekundach aplikacja powinna pojawić się na ekranie. 🎉
+
+---
