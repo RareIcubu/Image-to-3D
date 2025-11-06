@@ -1,0 +1,22 @@
+# Pliki generowane przez system
+.DS_Store
+*.swp
+
+# Pliki generowane przez IDE
+.vscode/
+.idea/
+*.suo
+*.user
+
+# Folder 'build' z Twojego projektu C++
+# To jest NAJWAŻNIEJSZA linia!
+src/build/
+
+# Inne pliki kompilacji (na wszelki wypadek)
+*.o
+*.a
+*.so
+TwojaAplikacja # Nazwa Twojego skompilowanego programu
+
+# Pliki tymczasowe Docker (choć rzadko potrzebne)
+.dockerignore

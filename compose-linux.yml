@@ -1,0 +1,9 @@
+# compose-linux.yml (TYLKO DLA CIEBIE I INNYCH NA LINUKSIE)
+
+services:
+  dev:
+    # Dodajemy ustawienia dla serwera X11
+    environment:
+      - DISPLAY=${DISPLAY}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw

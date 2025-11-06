@@ -1,0 +1,11 @@
+# docker-compose.prod.yml (Baza dla PROD)
+services:
+  prod:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # Ta opcja mówi, żeby budować TYLKO etap "final"
+      target: final
+    container_name: grafika_gui_prod
+    image: grafika-gui-projekt-prod # Obraz produkcyjny
+    # (Brak 'volumes' z kodem, brak 'tty: true')
