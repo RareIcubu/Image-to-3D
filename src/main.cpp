@@ -1,7 +1,6 @@
 #include <QApplication>
-#include <QMainWindow>
 #include <iostream>
-#include "mainframe.h"
+#include "mainwindow.h"
 
 // Dołączamy nasz plik konfiguracyjny z wersją
 #include "config.h"
@@ -15,19 +14,13 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
 
     // Stworzenie głównego okna
-    QMainWindow mainWindow;
+    MainWindow *mainWindow = new MainWindow();
 
     // Ustawienie tytułu okna
-    mainWindow.setWindowTitle("ImageTo3D Konwerter");
-
-    // Ustawienie domyślnego rozmiaru okna
-    mainWindow.resize(800, 600);
-
-    MainFrame* mainF = new MainFrame(&mainWindow);
-    mainWindow.setCentralWidget(mainF);
+    mainWindow->setWindowTitle("ImageTo3D Konwerter");
 
     // Pokaż okno
-    mainWindow.show();
+    mainWindow->show();
 
     // Uruchom pętlę zdarzeń aplikacji
     return app.exec();

@@ -33,9 +33,9 @@ configure_file(
 # Dodaj plik wykonywalny (nazwa 'ImageTo3D' z pliku 'main.cpp')
 add_executable(ImageTo3D
     main.cpp
-    mainframe.cpp
-    mainframe.h
-    mainframe.ui
+    mainwindow.cpp
+    mainwindow.h
+    mainwindow.ui
 )
 
 # Dołącz folder 'build', aby program znalazł config.h

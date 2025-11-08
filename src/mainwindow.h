@@ -1,8 +1,8 @@
-// mainframe.h
-#ifndef MAINFRAME_H
-#define MAINFRAME_H
+// MainWindow.h
+#ifndef MAINWINDOW_H
+#define MAINWINDOW_H
 
-#include <QFrame>
+#include <QMainWindow>
 #include <QModelIndex>
 #include <QEvent>
 
@@ -14,16 +14,16 @@ class QGraphicsPixmapItem;
 // (usuń deklaracje proxy, jeśli wróciłeś do QFileSystemModel)
 
 namespace Ui {
-class MainFrame;
+class MainWindow;
 }
 
-class MainFrame : public QFrame
+class MainWindow : public QMainWindow
 {
     Q_OBJECT
 
 public:
-    explicit MainFrame(QWidget *parent = nullptr);
-    ~MainFrame();
+    explicit MainWindow(QWidget *parent = nullptr);
+    ~MainWindow();
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -36,7 +36,7 @@ private slots:
     void on_treeView_clicked(const QModelIndex &index);
 
 private:
-    Ui::MainFrame *ui;
+    Ui::MainWindow *ui;
     QFileSystemModel *m_dirModel; // Zakładam, że masz jeden model
 
     // --- NOWE ZMIENNE ---
@@ -44,4 +44,4 @@ private:
     QGraphicsPixmapItem *m_pixmapItem; // Obrazek, który będziemy podmieniać
 };
 
-#endif // MAINFRAME_H
+#endif // MainWindow_H
