@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 
 # Ustaw nazwę projektu, wersję (jak w README) i języki
 project(ImageTo3D
-        VERSION 1.0.0
+        VERSION 0.1.0
         DESCRIPTION "2D Image to 3D Converter"
         LANGUAGES CXX)
 
@@ -33,6 +33,9 @@ configure_file(
 # Dodaj plik wykonywalny (nazwa 'ImageTo3D' z pliku 'main.cpp')
 add_executable(ImageTo3D
     main.cpp
+    mainframe.cpp
+    mainframe.h
+    mainframe.ui
 )
 
 # Dołącz folder 'build', aby program znalazł config.h
