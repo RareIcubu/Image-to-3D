@@ -20,13 +20,14 @@ MainFrame::MainFrame(QWidget *parent)
     ui->treeView->hideColumn(1); // Ukryj kolumnę Rozmiar
     ui->treeView->hideColumn(2); // Ukryj kolumnę Typ
     ui->treeView->hideColumn(3); // Ukryj kolumnę Data
-
+    ui->progressBar->hide();
     // Ustawiamy ścieżkę startową (np. folder domowy)
     ui->treeView->setRootIndex(m_dirModel->setRootPath(QDir::homePath()));
 
     // Nie musimy pisać connect(...), ponieważ Qt automatycznie połączy
     // sygnał clicked() z przycisku 'DirectoryButton'
     // z naszą funkcją 'on_DirectoryButton_clicked()'
+    connect(m_dirModel,&QFileSystemModel::directoryLoaded,this,&MainFrame::onModelLoaded);
 }
 
 MainFrame::~MainFrame()
@@ -47,7 +48,14 @@ void MainFrame::on_DirectoryButton_clicked()
         return;
     }
 
+    ui->progressBar->show();
+
     // 3. Ustaw nową ścieżkę jako główny widok w treeView
     // Model sam zajmie się resztą (załadowaniem plików itp.)
     ui->treeView->setRootIndex(m_dirModel->setRootPath(dirPath));
+}
+
+void MainFrame::onModelLoaded()
+{
+    ui->progressBar->hide();
 }

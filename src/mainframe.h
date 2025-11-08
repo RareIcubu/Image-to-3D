@@ -19,6 +19,7 @@ public:
 
 private slots:
     void on_DirectoryButton_clicked();
+    void onModelLoaded();
 
 private:
     Ui::MainFrame *ui;
