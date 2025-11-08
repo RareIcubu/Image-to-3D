@@ -1,9 +1,12 @@
 # Wymagana minimalna wersja CMake
 cmake_minimum_required(VERSION 3.16)
 
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/version.txt" APP_VERSION)
+string(STRIP "${APP_VERSION}" APP_VERSION)
+
 # Ustaw nazwę projektu, wersję (jak w README) i języki
 project(ImageTo3D
-        VERSION 0.1.0
+    VERSION ${APP_VERSION}
         DESCRIPTION "2D Image to 3D Converter"
         LANGUAGES CXX)
 

@@ -35,6 +35,8 @@ private slots:
     // Ten slot zostaje bez zmian
     void on_treeView_clicked(const QModelIndex &index);
 
+    void on_actionO_programie_triggered();
+
 private:
     Ui::MainWindow *ui;
     QFileSystemModel *m_dirModel; // Zakładam, że masz jeden model

@@ -10,6 +10,9 @@
 #include <QGraphicsPixmapItem>  // <-- DODAJ
 #include <QPixmap>
 #include <QWheelEvent>
+#include <QMessageBox>
+
+#include "config.h"
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -19,6 +22,9 @@ MainWindow::MainWindow(QWidget *parent)
     , m_pixmapItem(new QGraphicsPixmapItem())
 {
     ui->setupUi(this);
+
+    ui->menu_Widok->addAction(ui->inputDockWidget->toggleViewAction());
+    ui->menu_Widok->addAction(ui->logDockWidget->toggleViewAction());
 
     // --- Ustawienia modelu ---
 
@@ -162,5 +168,18 @@ void MainWindow::on_treeView_clicked(const QModelIndex &index)
     //    dopasował zoom i pokazał cały obrazek
     ui->graphicsView_3->fitInView(m_pixmapItem, Qt::KeepAspectRatio);
 
+}
+
+void MainWindow::on_actionO_programie_triggered()
+{
+    // Używamy standardowego okna dialogowego "About"
+    QMessageBox::about(this, // Rodzic (to okno)
+                       tr("O programie ImageTo3D"), // Tytuł okna
+                       tr("<h3>ImageTo3D Konwerter</h3>" // Tekst (można używać HTML)
+                          "<p>Projekt na przedmiot Grafika i GUI.</p>"
+                          "<p><b>Wersja:</b> %1</p>" // Użyjemy %1 jako "placeholder"
+                          "<p>Autorzy: Jakub Jasiński, Kamil Pojedynek, Kacper Ulanowski</p>")
+                           .arg(PROJECT_VERSION) // Wstaw wersję z config.h w miejsce %1
+                       );
 }
 
