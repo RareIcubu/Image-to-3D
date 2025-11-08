@@ -7,17 +7,17 @@
 #include <QFileDialog>
 #include <QFileSystemModel>
 #include <QStringList>
-
-// Plik .h powinien teraz zawierać tylko:
-// class QFileSystemModel;
-// ...
-// QFileSystemModel *m_dirModel;
-
+#include <QGraphicsScene>       // <-- DODAJ
+#include <QGraphicsPixmapItem>  // <-- DODAJ
+#include <QPixmap>
+#include <QWheelEvent>
 
 MainFrame::MainFrame(QWidget *parent)
     : QFrame(parent)
     , ui(new Ui::MainFrame)
     , m_dirModel(new QFileSystemModel(this)) // Zainicjuj JEDEN model
+    , m_scene(new QGraphicsScene(this))
+    , m_pixmapItem(new QGraphicsPixmapItem())
 {
     ui->setupUi(this);
 
@@ -49,6 +49,23 @@ MainFrame::MainFrame(QWidget *parent)
     // a nie na pusty folder domowy (/home/devuser).
     ui->treeView->setRootIndex(m_dirModel->setRootPath("/app"));
 
+
+    m_scene->addItem(m_pixmapItem);
+
+    // 2. Powiedz 'graphicsView' z .ui, żeby patrzył na naszą scenę
+    ui->graphicsView->setScene(m_scene);
+
+    // 3. (Opcjonalnie) Ustaw tryb przeciągania myszką
+    //    Teraz możesz przesuwać obrazek wciśniętą rolką lub lewym przyciskiem
+    ui->graphicsView->setDragMode(QGraphicsView::ScrollHandDrag);
+    ui->graphicsView->setResizeAnchor(QGraphicsView::AnchorUnderMouse);
+    ui->graphicsView->installEventFilter(this);
+
+    // 4. (Opcjonalnie) Dodaj lepsze renderowanie
+    ui->graphicsView->setRenderHint(QPainter::Antialiasing);
+    ui->graphicsView->setRenderHint(QPainter::SmoothPixmapTransform);
+
+
     // Połącz sygnał ładowania z naszym slotem
     connect(m_dirModel, &QFileSystemModel::directoryLoaded,
             this, &MainFrame::onModelLoaded);
@@ -58,6 +75,39 @@ MainFrame::~MainFrame()
 {
     delete ui;
 }
+
+bool MainFrame::eventFilter(QObject *watched, QEvent *event)
+{
+    // Sprawdź, czy zdarzenie pochodzi z naszego graphicsView
+    if (watched == ui->graphicsView)
+    {
+        // Sprawdź, czy zdarzenie to kółko myszy
+        if (event->type() == QEvent::Wheel)
+        {
+            // Rzutuj zdarzenie na QWheelEvent
+            QWheelEvent *wheelEvent = static_cast<QWheelEvent*>(event);
+
+            // Ustaw współczynnik zoomu
+            double scaleFactor = 1.15;
+
+            if (wheelEvent->angleDelta().y() > 0) {
+                // Kręcenie kółkiem w górę (do siebie) - Zoom In
+                ui->graphicsView->scale(scaleFactor, scaleFactor);
+            } else {
+                // Kręcenie kółkiem w dół (od siebie) - Zoom Out
+                ui->graphicsView->scale(1.0 / scaleFactor, 1.0 / scaleFactor);
+            }
+
+            // Zjedliśmy to zdarzenie - nie puszczaj go dalej
+            return true;
+        }
+    }
+
+    // Przekaż wszystkie inne zdarzenia (jak kliknięcia itp.)
+    // do domyślnej obsługi
+    return QFrame::eventFilter(watched, event);
+}
+
 
 void MainFrame::on_DirectoryButton_clicked()
 {
@@ -78,4 +128,38 @@ void MainFrame::on_DirectoryButton_clicked()
 void MainFrame::onModelLoaded()
 {
     ui->progressBar->hide();
+}
+
+void MainFrame::on_treeView_clicked(const QModelIndex &index)
+{
+    // (Jeśli masz proxy, tu musi być mapowanie na sourceIndex)
+
+    // 1. Sprawdź, czy to plik, a nie folder
+    if (m_dirModel->isDir(index)) {
+        // Czyść stary obrazek, jeśli kliknięto na folder
+        m_pixmapItem->setPixmap(QPixmap());
+        m_scene->setSceneRect(m_scene->itemsBoundingRect()); // Zresetuj widok
+        return;
+    }
+
+    // 2. Pobierz pełną ścieżkę do pliku z modelu
+    QString filePath = m_dirModel->filePath(index);
+
+    // 3. Wczytaj obraz do obiektu QPixmap
+    QPixmap pixmap(filePath);
+
+    // 4. Sprawdź, czy obraz wczytał się poprawnie
+    if (pixmap.isNull()) {
+        m_pixmapItem->setPixmap(QPixmap()); // Czyść w razie błędu
+        m_scene->setSceneRect(m_scene->itemsBoundingRect());
+        return;
+    }
+
+    // 5. Zamiast ustawiać QLabel, podmień obrazek w naszym QGraphicsPixmapItem
+    m_pixmapItem->setPixmap(pixmap);
+
+    // 6. KLUCZOWY KROK: Powiedz widokowi, żeby automatycznie
+    //    dopasował zoom i pokazał cały obrazek
+    ui->graphicsView->fitInView(m_pixmapItem, Qt::KeepAspectRatio);
+
 }
