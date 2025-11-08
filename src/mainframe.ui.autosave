@@ -101,6 +101,9 @@
      <property name="selectionMode">
       <enum>QAbstractItemView::SelectionMode::MultiSelection</enum>
      </property>
+     <property name="sortingEnabled">
+      <bool>true</bool>
+     </property>
     </widget>
    </item>
    <item row="4" column="0" colspan="2">

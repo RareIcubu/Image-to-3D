@@ -1,33 +1,57 @@
+// mainframe.cpp
+
 #include "mainframe.h"
 #include "ui_mainframe.h"
 
+// Dołącz potrzebne klasy
 #include <QFileDialog>
 #include <QFileSystemModel>
+#include <QStringList>
+
+// Plik .h powinien teraz zawierać tylko:
+// class QFileSystemModel;
+// ...
+// QFileSystemModel *m_dirModel;
+
 
 MainFrame::MainFrame(QWidget *parent)
     : QFrame(parent)
     , ui(new Ui::MainFrame)
-    , m_dirModel(new QFileSystemModel(this))
+    , m_dirModel(new QFileSystemModel(this)) // Zainicjuj JEDEN model
 {
     ui->setupUi(this);
-    // Ustawiamy filtry (nie chcemy widzieć "." i "..")
+
+    // --- Ustawienia modelu ---
+
+    // 1. Ustaw filtr QDir (co ma wczytywać z dysku)
     m_dirModel->setFilter(QDir::NoDotAndDotDot | QDir::AllDirs | QDir::Files);
 
-    // Podłączamy nasz model do widoku (treeView) z pliku .ui
-    ui->treeView->setModel(m_dirModel);
+    // 2. Ustaw filtr nazw (ignoruje wielkość liter)
+    m_dirModel->setNameFilters(QStringList() << "*.jpg" << "*.jpeg" << "*.png");
 
-    // Możemy też ukryć kolumny, których nie potrzebujemy (np. Rozmiar, Data modyfikacji)
-    ui->treeView->hideColumn(1); // Ukryj kolumnę Rozmiar
-    ui->treeView->hideColumn(2); // Ukryj kolumnę Typ
-    ui->treeView->hideColumn(3); // Ukryj kolumnę Data
+    // 3. TO JEST KLUCZ:
+    // Mówi modelowi, aby UKRYWAŁ pliki, a nie je "wyszarzał".
+    m_dirModel->setNameFilterDisables(false);
+
+    // --- Ustawienia widoku ---
+    ui->treeView->setModel(m_dirModel); // Podłącz model do widoku
+
+    // Ukryj niepotrzebne kolumny
+    ui->treeView->hideColumn(1); // Rozmiar
+    ui->treeView->hideColumn(2); // Typ
+    ui->treeView->hideColumn(3); // Data
+
     ui->progressBar->hide();
-    // Ustawiamy ścieżkę startową (np. folder domowy)
-    ui->treeView->setRootIndex(m_dirModel->setRootPath(QDir::homePath()));
+    ui->progressBar->setRange(0, 0); // Ustaw na "spinner"
 
-    // Nie musimy pisać connect(...), ponieważ Qt automatycznie połączy
-    // sygnał clicked() z przycisku 'DirectoryButton'
-    // z naszą funkcją 'on_DirectoryButton_clicked()'
-    connect(m_dirModel,&QFileSystemModel::directoryLoaded,this,&MainFrame::onModelLoaded);
+    // 4. TO JEST DRUGI KLUCZ:
+    // Ustaw ścieżkę startową na folder, w którym JEST KOD (/app),
+    // a nie na pusty folder domowy (/home/devuser).
+    ui->treeView->setRootIndex(m_dirModel->setRootPath("/app"));
+
+    // Połącz sygnał ładowania z naszym slotem
+    connect(m_dirModel, &QFileSystemModel::directoryLoaded,
+            this, &MainFrame::onModelLoaded);
 }
 
 MainFrame::~MainFrame()
@@ -35,23 +59,19 @@ MainFrame::~MainFrame()
     delete ui;
 }
 
-// --- Implementacja naszego slotu ---
 void MainFrame::on_DirectoryButton_clicked()
 {
-    // 1. Otwórz standardowe okno dialogowe do wyboru folderu
+    // Użyj ostatnio wybranej ścieżki jako startowej, zamiast homePath
+    QString startPath = m_dirModel->rootPath();
+
     QString dirPath = QFileDialog::getExistingDirectory(this,
                                                         tr("Wybierz folder"),
-                                                        QDir::homePath()); // Zacznij od folderu domowego
-
-    // 2. Sprawdź, czy użytkownik coś wybrał (a nie kliknął "Anuluj")
+                                                        startPath);
     if (dirPath.isEmpty()) {
         return;
     }
 
     ui->progressBar->show();
-
-    // 3. Ustaw nową ścieżkę jako główny widok w treeView
-    // Model sam zajmie się resztą (załadowaniem plików itp.)
     ui->treeView->setRootIndex(m_dirModel->setRootPath(dirPath));
 }
 
