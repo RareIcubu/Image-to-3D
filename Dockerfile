@@ -82,7 +82,7 @@ WORKDIR /home/appuser
 
 # Skopiuj TYLKO gotowy, skompilowany program z etapu "builder"
 # Zmień "TwojaAplikacja" na poprawną nazwę
-COPY --from=builder /app/src/build/TwojaAplikacja .
+COPY --from=builder /app/src/build/ImageTo3D .
 
 # Ustaw domyślną komendę na uruchomienie aplikacji
-CMD ["./TwojaAplikacja"]
+CMD ["./ImageTo3D"]
