@@ -19,6 +19,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     qt6-tools-dev \
     qt6-tools-dev-tools \
     libopencv-dev \
+    # COLMAP & 3D Tools
+    colmap \
+    meshlab \
     x11-apps \
     libx11-dev \
     libgl1-mesa-dev \
@@ -70,6 +73,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     libopencv-core4.5d \
     libopencv-imgproc4.5d \
     libopencv-imgcodecs4.5d \
+    colmap \
     x11-apps \
     libx11-6 \
     libgl1 \

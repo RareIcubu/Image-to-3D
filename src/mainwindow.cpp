@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 
 #include "ui_mainwindow.h"
+#include <opencv2/opencv.hpp>
 
 // Dołącz potrzebne klasy
 #include <QFileDialog>
@@ -22,6 +23,40 @@ MainWindow::MainWindow(QWidget *parent)
     , m_pixmapItem(new QGraphicsPixmapItem())
 {
     ui->setupUi(this);
+
+    // --- THREADING SETUP ---
+
+    // 1. Create the Thread
+    m_workerThread = new QThread(this);
+
+    // 2. Create the Manager (Do NOT give it a parent yet, or you can't move it)
+    m_manager = new ReconstructionManager();
+
+    // 3. Move the Manager to the Thread
+    m_manager->moveToThread(m_workerThread);
+
+    // 4. Connect Signals and Slots
+
+    // Trigger: When MainWindow emits 'requestReconstruction', Manager runs 'startReconstruction'
+    connect(this, &MainWindow::requestReconstruction, m_manager, &ReconstructionManager::startReconstruction);
+
+    // Feedback: Manager -> MainWindow
+    connect(m_manager, &ReconstructionManager::progressUpdated, this, &MainWindow::onProgressUpdated);
+    connect(m_manager, &ReconstructionManager::finished, this, &MainWindow::onReconstructionFinished);
+
+    // Error Handling: Use QueuedConnection to ensure thread safety for UI boxes
+    connect(m_manager, &ReconstructionManager::errorOccurred, this, [this](QString msg){
+        // Ensure this runs on the GUI thread
+        QMetaObject::invokeMethod(this, [this, msg](){
+            QMessageBox::critical(this, "Error", msg);
+        }, Qt::QueuedConnection);
+    });
+
+    // Cleanup: When thread finishes, delete the manager
+    connect(m_workerThread, &QThread::finished, m_manager, &QObject::deleteLater);
+
+    // 5. Start the Thread (It enters its event loop and waits for signals)
+    m_workerThread->start();
 
     ui->menu_Widok->addAction(ui->inputDockWidget->toggleViewAction());
     ui->menu_Widok->addAction(ui->logDockWidget->toggleViewAction());
@@ -79,6 +114,11 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    // Clean shutdown of thread
+    if (m_workerThread->isRunning()) {
+        m_workerThread->quit();
+        m_workerThread->wait();
+    }
     delete ui;
 }
 
@@ -125,6 +165,10 @@ void MainWindow::on_DirectoryButton_clicked()
                                                         startPath);
     if (dirPath.isEmpty()) {
         return;
+    }
+    else {
+        m_selectedDirectory = dirPath;
+        QMessageBox::information(this, "Directory Selected", "Selected: " + dirPath);
     }
 
     ui->progressBar->show();
@@ -183,3 +227,66 @@ void MainWindow::on_actionO_programie_triggered()
                        );
 }
 
+// 2. YOUR TEST: Open all images with OpenCV (Button 2)
+void MainWindow::on_pushButton_2_clicked()
+{
+    if (m_selectedDirectory.isEmpty()) {
+        QMessageBox::warning(this, "No Directory", "Please select a directory first (Button 1)!");
+        return;
+    }
+
+    QDir dir(m_selectedDirectory);
+    QStringList filters;
+    filters << "*.png" << "*.jpg" << "*.jpeg";
+    dir.setNameFilters(filters);
+    QFileInfoList list = dir.entryInfoList();
+
+    if (list.isEmpty()) {
+        QMessageBox::warning(this, "No Images", "No images found in selected directory.");
+        return;
+    }
+
+    // Loop through images and show them
+    for (const QFileInfo &fileInfo : list) {
+        std::string path = fileInfo.absoluteFilePath().toStdString();
+
+        // OpenCV Read
+        cv::Mat img = cv::imread(path);
+
+        if (img.empty()) {
+            qDebug() << "Failed to load:" << fileInfo.fileName();
+            continue;
+        }
+
+        // OpenCV Show (Creates a popup window)
+        cv::imshow("Test Preview (Press any key for next)", img);
+
+        // Wait 500ms or until key press
+        cv::waitKey(500);
+    }
+
+    cv::destroyAllWindows();
+    QMessageBox::information(this, "Test Complete", "Finished displaying images.");
+
+    if (m_selectedDirectory.isEmpty()) return;
+
+    QString workspace = m_selectedDirectory + "/workspace_3d";
+
+    // CRITICAL: Do NOT call m_manager->startReconstruction() directly!
+    // That would run it on the GUI thread.
+    // Instead, emit the signal:
+    emit requestReconstruction(m_selectedDirectory, workspace);
+}
+
+void MainWindow::onProgressUpdated(QString step, int percentage)
+{
+    // Assuming you have a label and progress bar in UI
+    // ui->statusLabel->setText(step);
+    // ui->progressBar->setValue(percentage);
+    qDebug() << "Progress:" << step << percentage << "%";
+}
+
+void MainWindow::onReconstructionFinished(QString modelPath)
+{
+    QMessageBox::information(this, "Success", "3D Model created at:\n" + modelPath);
+}

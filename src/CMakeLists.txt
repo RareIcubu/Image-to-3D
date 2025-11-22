@@ -39,6 +39,8 @@ add_executable(ImageTo3D
     mainwindow.cpp
     mainwindow.h
     mainwindow.ui
+    reconstructionmanager.cpp
+    reconstructionmanager.h
 )
 
 # Dołącz folder 'build', aby program znalazł config.h
