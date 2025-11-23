@@ -247,28 +247,29 @@ void MainWindow::on_pushButton_2_clicked()
     }
 
     // Loop through images and show them
-    for (const QFileInfo &fileInfo : list) {
-        std::string path = fileInfo.absoluteFilePath().toStdString();
+    // for (const QFileInfo &fileInfo : list) {
+    //     std::string path = fileInfo.absoluteFilePath().toStdString();
 
-        // OpenCV Read
-        cv::Mat img = cv::imread(path);
+    //     // OpenCV Read
+    //     cv::Mat img = cv::imread(path);
 
-        if (img.empty()) {
-            qDebug() << "Failed to load:" << fileInfo.fileName();
-            continue;
-        }
+    //     if (img.empty()) {
+    //         qDebug() << "Failed to load:" << fileInfo.fileName();
+    //         continue;
+    //     }
 
-        // OpenCV Show (Creates a popup window)
-        cv::imshow("Test Preview (Press any key for next)", img);
+    //     // OpenCV Show (Creates a popup window)
+    //     cv::imshow("Test Preview (Press any key for next)", img);
 
-        // Wait 500ms or until key press
-        cv::waitKey(500);
-    }
-
-    cv::destroyAllWindows();
-    QMessageBox::information(this, "Test Complete", "Finished displaying images.");
+    //     // Wait 500ms or until key press
+    //     cv::waitKey(500);
+    // }
+    // cv::destroyAllWindows();
+    //QMessageBox::information(this, "Test Complete", "Finished displaying images.");
 
     if (m_selectedDirectory.isEmpty()) return;
+
+    ui->progressBar->show();
 
     QString workspace = m_selectedDirectory + "/workspace_3d";
 
@@ -281,12 +282,14 @@ void MainWindow::on_pushButton_2_clicked()
 void MainWindow::onProgressUpdated(QString step, int percentage)
 {
     // Assuming you have a label and progress bar in UI
-    // ui->statusLabel->setText(step);
-    // ui->progressBar->setValue(percentage);
+     ui->textEdit->append(step);
+     ui->progressBar->setValue(percentage);
     qDebug() << "Progress:" << step << percentage << "%";
 }
 
 void MainWindow::onReconstructionFinished(QString modelPath)
 {
     QMessageBox::information(this, "Success", "3D Model created at:\n" + modelPath);
+
+    ui->progressBar->hide();
 }

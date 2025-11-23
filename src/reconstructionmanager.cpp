@@ -40,20 +40,20 @@ void ReconstructionManager::runNextStep() {
 
     switch (m_currentStep) {
     case 0: // FEATURE EXTRACTION
-        emit progressUpdated("Extracting Features...", 10);
+        emit progressUpdated("Extracting Features...\n", 10);
         arguments << "feature_extractor"
                   << arg("database_path", m_workspacePath + "/database.db")
                   << arg("image_path", m_imagesPath);
         break;
 
     case 1: // FEATURE MATCHING
-        emit progressUpdated("Matching Features...", 25);
+        emit progressUpdated("Matching Features...\n", 25);
         arguments << "exhaustive_matcher"
                   << arg("database_path", m_workspacePath + "/database.db");
         break;
 
     case 2: // SPARSE RECONSTRUCTION
-        emit progressUpdated("Sparse Reconstruction...", 40);
+        emit progressUpdated("Sparse Reconstruction...\n", 40);
         QDir(m_workspacePath + "/sparse").mkpath(".");
         arguments << "mapper"
                   << arg("database_path", m_workspacePath + "/database.db")
@@ -67,7 +67,7 @@ void ReconstructionManager::runNextStep() {
         if (m_useFastMode) {
             // FIX: Instead of Meshing (which requires missing CGAL),
             // we just CONVERT the sparse points to a viewable .PLY file.
-            emit progressUpdated("Exporting Point Cloud...", 90);
+            emit progressUpdated("Exporting Point Cloud...\n", 90);
 
             arguments << "model_converter"
                       << arg("input_path", m_workspacePath + "/sparse/0") // Internal binary format
@@ -78,7 +78,7 @@ void ReconstructionManager::runNextStep() {
             m_currentStep = 99;
         } else {
             // NORMAL PATH: Prepare for Dense
-            emit progressUpdated("Undistorting Images...", 55);
+            emit progressUpdated("Undistorting Images...\n", 55);
             QDir(m_workspacePath + "/dense").mkpath(".");
             arguments << "image_undistorter"
                       << arg("image_path", m_imagesPath)
@@ -91,14 +91,14 @@ void ReconstructionManager::runNextStep() {
 
     case 4: // DENSE RECONSTRUCTION (Skipped if Fast Mode)
         if (m_fallbackToCpu) {
-            emit progressUpdated("Calculating Depth Maps (CPU Fallback)...", 70);
+            emit progressUpdated("Calculating Depth Maps (CPU Fallback)...\n", 70);
             arguments << "patch_match_stereo"
                       << arg("workspace_path", m_workspacePath + "/dense")
                       << arg("workspace_format", "COLMAP")
                       << arg("PatchMatchStereo.geom_consistency", "false")
                       << arg("PatchMatchStereo.gpu_index", "");
         } else {
-            emit progressUpdated("Calculating Depth Maps (GPU)...", 70);
+            emit progressUpdated("Calculating Depth Maps (GPU)...\n", 70);
             arguments << "patch_match_stereo"
                       << arg("workspace_path", m_workspacePath + "/dense")
                       << arg("workspace_format", "COLMAP")
@@ -107,7 +107,7 @@ void ReconstructionManager::runNextStep() {
         break;
 
     case 5: // FUSION (Skipped if Fast Mode)
-        emit progressUpdated("Fusing Point Cloud...", 85);
+        emit progressUpdated("Fusing Point Cloud...\n", 85);
         arguments << "stereo_fusion"
                   << arg("workspace_path", m_workspacePath + "/dense")
                   << arg("workspace_format", "COLMAP")
@@ -116,7 +116,7 @@ void ReconstructionManager::runNextStep() {
         break;
 
     case 6: // POISSON MESHING (Skipped if Fast Mode)
-        emit progressUpdated("Generating Mesh...", 90);
+        emit progressUpdated("Generating Mesh...\n", 90);
         arguments << "poisson_mesher"
                   << arg("input_path", m_workspacePath + "/dense/fused.ply")
                   << arg("output_path", m_workspacePath + "/model.ply");
