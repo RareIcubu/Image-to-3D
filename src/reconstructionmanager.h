@@ -7,6 +7,7 @@
 #include <QProcess>
 #include <QString>
 #include <QDebug>
+#include <QElapsedTimer>
 
 class ReconstructionManager : public QObject {
     Q_OBJECT
@@ -24,6 +25,8 @@ signals:
     void errorOccurred(QString message);
 
 private:
+    QElapsedTimer m_stepTimer;
+
     void runNextStep();
 
     QString m_workspacePath;

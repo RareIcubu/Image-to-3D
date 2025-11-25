@@ -271,8 +271,10 @@ void MainWindow::on_pushButton_2_clicked()
 
     ui->progressBar->show();
 
-    QString workspace = m_selectedDirectory + "/workspace_3d";
-
+    QDir imgDir(m_selectedDirectory);
+    QString folderName = imgDir.dirName();
+    imgDir.cdUp(); // Wyjdź piętro wyżej
+    QString workspace = imgDir.filePath(folderName + "_workspace");
     // CRITICAL: Do NOT call m_manager->startReconstruction() directly!
     // That would run it on the GUI thread.
     // Instead, emit the signal:
@@ -281,12 +283,40 @@ void MainWindow::on_pushButton_2_clicked()
 
 void MainWindow::onProgressUpdated(QString step, int percentage)
 {
-    // Assuming you have a label and progress bar in UI
-     ui->textEdit->append(step);
-     ui->progressBar->setValue(percentage);
-    qDebug() << "Progress:" << step << percentage << "%";
-}
+    // --- 1. OBSŁUGA LOGÓW (Z TIMESTAMPEM) ---
+    QString timestamp = QDateTime::currentDateTime().toString("[HH:mm:ss] ");
+    QString cleanMsg = step.trimmed();
 
+    // Dodajemy tekst tylko jeśli nie jest pusty
+    if (!cleanMsg.isEmpty()) {
+        QString finalLog = timestamp + cleanMsg;
+        ui->textEdit->append(finalLog);
+
+        // Wymuszenie przewinięcia na sam dół (Auto-scroll)
+        // Żeby użytkownik zawsze widział najnowszą linię
+        QTextCursor c = ui->textEdit->textCursor();
+        c.movePosition(QTextCursor::End);
+        ui->textEdit->setTextCursor(c);
+    }
+
+    // --- 2. OBSŁUGA PASKA POSTĘPU ---
+
+    if (percentage < 0) {
+        // WARTOŚĆ -1: Oznacza "Tylko loguj, nie zmieniaj paska".
+        // Jeśli pasek był w trybie spinnera (kręcił się), zostawiamy go.
+        return;
+    }
+
+    // WARTOŚĆ >= 0: Mamy konkretny procent.
+    
+    // Jeśli pasek jest w trybie "nieskończonym" (Range 0-0), 
+    // musimy go przełączyć na tryb procentowy (Range 0-100).
+    if (ui->progressBar->maximum() == 0) {
+        ui->progressBar->setRange(0, 100);
+    }
+
+    ui->progressBar->setValue(percentage);
+}
 void MainWindow::onReconstructionFinished(QString modelPath)
 {
     QMessageBox::information(this, "Success", "3D Model created at:\n" + modelPath);
