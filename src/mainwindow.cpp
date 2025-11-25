@@ -269,6 +269,7 @@ void MainWindow::on_pushButton_2_clicked()
 
     if (m_selectedDirectory.isEmpty()) return;
 
+    ui->progressBar->setRange(0, 100); // Ustaw na "spinner"
     ui->progressBar->show();
 
     QDir imgDir(m_selectedDirectory);
@@ -322,4 +323,5 @@ void MainWindow::onReconstructionFinished(QString modelPath)
     QMessageBox::information(this, "Success", "3D Model created at:\n" + modelPath);
 
     ui->progressBar->hide();
+    ui->progressBar->setRange(0, 0); // Ustaw na "spinner"
 }
