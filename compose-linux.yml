@@ -1,9 +1,21 @@
-# compose-linux.yml (TYLKO DLA CIEBIE I INNYCH NA LINUKSIE)
-
 services:
   dev:
-    # Dodajemy ustawienia dla serwera X11
     environment:
       - DISPLAY=${DISPLAY}
+      
+      # --- ZDEJMUJEMY BLOKADY ---
+      # - QT_XCB_GL_INTEGRATION=none  <-- Zakomentuj lub usuń
+      # - LIBGL_ALWAYS_SOFTWARE=1     <-- Zakomentuj lub usuń (To blokowało COLMAP!)
+
+      # --- KONFIGURACJA NVIDIA ---
+      # 'all' udostępnia: compute, utility, graphics (OpenGL), display
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
+
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
