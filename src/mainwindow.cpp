@@ -1,248 +1,154 @@
 #include "mainwindow.h"
-
 #include "ui_mainwindow.h"
-#include <opencv2/opencv.hpp>
+#include "config.h" 
 
-// Dołącz potrzebne klasy
 #include <QFileDialog>
 #include <QFileSystemModel>
-#include <QStringList>
-#include <QGraphicsScene>       // <-- DODAJ
-#include <QGraphicsPixmapItem>  // <-- DODAJ
-#include <QPixmap>
-#include <QWheelEvent>
 #include <QMessageBox>
-
-#include "config.h"
+#include <QGraphicsScene>
+#include <QGraphicsPixmapItem>
+#include <QWheelEvent>
+#include <QDateTime>
+#include <QDebug>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
-    , m_dirModel(new QFileSystemModel(this)) // Zainicjuj JEDEN model
+    , m_dirModel(new QFileSystemModel(this))
+    // Inicjalizacja managerów (bez rodzica, bo idą do wątków)
+    , m_manager(new ReconstructionManager())
+    , m_workerThread(new QThread(this))
+    , m_aiManager(new AIReconstructionManager())
+    , m_aiThread(new QThread(this))
+    // Grafika
     , m_scene(new QGraphicsScene(this))
     , m_pixmapItem(new QGraphicsPixmapItem())
 {
     ui->setupUi(this);
-
-    // --- THREADING SETUP ---
-
-    // 1. Create the Thread
-    m_workerThread = new QThread(this);
-
-    // 2. Create the Manager (Do NOT give it a parent yet, or you can't move it)
-    m_manager = new ReconstructionManager();
-
-    // 3. Move the Manager to the Thread
+    refreshModelList();
+    // === KONFIGURACJA WĄTKU 1: COLMAP ===
     m_manager->moveToThread(m_workerThread);
-
-    // 4. Connect Signals and Slots
-
-    // Trigger: When MainWindow emits 'requestReconstruction', Manager runs 'startReconstruction'
     connect(this, &MainWindow::requestReconstruction, m_manager, &ReconstructionManager::startReconstruction);
-
-    // Feedback: Manager -> MainWindow
     connect(m_manager, &ReconstructionManager::progressUpdated, this, &MainWindow::onProgressUpdated);
     connect(m_manager, &ReconstructionManager::finished, this, &MainWindow::onReconstructionFinished);
-
-    // Error Handling: Use QueuedConnection to ensure thread safety for UI boxes
-    connect(m_manager, &ReconstructionManager::errorOccurred, this, [this](QString msg){
-        // Ensure this runs on the GUI thread
-        QMetaObject::invokeMethod(this, [this, msg](){
-            QMessageBox::critical(this, "Error", msg);
-        }, Qt::QueuedConnection);
-    });
-
-    // Cleanup: When thread finishes, delete the manager
+    connect(m_manager, &ReconstructionManager::errorOccurred, this, &MainWindow::onErrorOccurred);
     connect(m_workerThread, &QThread::finished, m_manager, &QObject::deleteLater);
-
-    // 5. Start the Thread (It enters its event loop and waits for signals)
     m_workerThread->start();
 
-    ui->menu_Widok->addAction(ui->inputDockWidget->toggleViewAction());
-    ui->menu_Widok->addAction(ui->logDockWidget->toggleViewAction());
+    // === KONFIGURACJA WĄTKU 2: AI (ONNX) ===
+    m_aiManager->moveToThread(m_aiThread);
+    connect(this, &MainWindow::requestAiReconstruction, m_aiManager, &AIReconstructionManager::startAI);
+    // Używamy tych samych slotów do GUI, bo interfejs jest wspólny
+    connect(m_aiManager, &AIReconstructionManager::progressUpdated, this, &MainWindow::onProgressUpdated);
+    connect(m_aiManager, &AIReconstructionManager::finished, this, &MainWindow::onReconstructionFinished);
+    connect(m_aiManager, &AIReconstructionManager::errorOccurred, this, &MainWindow::onErrorOccurred);
+    connect(m_aiThread, &QThread::finished, m_aiManager, &QObject::deleteLater);
+    m_aiThread->start();
 
-    // --- Ustawienia modelu ---
+    // === KONFIGURACJA GUI ===
+    
+    // Docki w menu
+    if (ui->menu_Widok) {
+        ui->menu_Widok->addAction(ui->inputDockWidget->toggleViewAction());
+        ui->menu_Widok->addAction(ui->logDockWidget->toggleViewAction());
+    }
 
-    // 1. Ustaw filtr QDir (co ma wczytywać z dysku)
+    // Drzewo plików
     m_dirModel->setFilter(QDir::NoDotAndDotDot | QDir::AllDirs | QDir::Files);
-
-    // 2. Ustaw filtr nazw (ignoruje wielkość liter)
     m_dirModel->setNameFilters(QStringList() << "*.jpg" << "*.jpeg" << "*.png");
-
-    // 3. TO JEST KLUCZ:
-    // Mówi modelowi, aby UKRYWAŁ pliki, a nie je "wyszarzał".
     m_dirModel->setNameFilterDisables(false);
-
-    // --- Ustawienia widoku ---
-    ui->treeView->setModel(m_dirModel); // Podłącz model do widoku
-
-    // Ukryj niepotrzebne kolumny
-    ui->treeView->hideColumn(1); // Rozmiar
-    ui->treeView->hideColumn(2); // Typ
-    ui->treeView->hideColumn(3); // Data
-
-    ui->progressBar->hide();
-    ui->progressBar->setRange(0, 0); // Ustaw na "spinner"
-
-    // 4. TO JEST DRUGI KLUCZ:
-    // Ustaw ścieżkę startową na folder, w którym JEST KOD (/app),
-    // a nie na pusty folder domowy (/home/devuser).
+    ui->treeView->setModel(m_dirModel);
+    for (int i = 1; i < 4; ++i) ui->treeView->hideColumn(i);
     ui->treeView->setRootIndex(m_dirModel->setRootPath("/app"));
+    connect(m_dirModel, &QFileSystemModel::directoryLoaded, this, &MainWindow::onModelLoaded);
 
-
+    // Graphics View
     m_scene->addItem(m_pixmapItem);
-
-    // 2. Powiedz 'graphicsView_3' z .ui, żeby patrzył na naszą scenę
     ui->graphicsView_3->setScene(m_scene);
-
-    // 3. (Opcjonalnie) Ustaw tryb przeciągania myszką
-    //    Teraz możesz przesuwać obrazek wciśniętą rolką lub lewym przyciskiem
     ui->graphicsView_3->setDragMode(QGraphicsView::ScrollHandDrag);
+    ui->graphicsView_3->setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
     ui->graphicsView_3->setResizeAnchor(QGraphicsView::AnchorUnderMouse);
+    ui->graphicsView_3->setRenderHint(QPainter::Antialiasing);
     ui->graphicsView_3->installEventFilter(this);
 
-    // 4. (Opcjonalnie) Dodaj lepsze renderowanie
-    ui->graphicsView_3->setRenderHint(QPainter::Antialiasing);
-    ui->graphicsView_3->setRenderHint(QPainter::SmoothPixmapTransform);
-
-
-    // Połącz sygnał ładowania z naszym slotem
-    connect(m_dirModel, &QFileSystemModel::directoryLoaded,
-            this, &MainWindow::onModelLoaded);
-
+    // Logi
+    ui->textEdit->setReadOnly(true);
+    appendLog("--- Gotowy do pracy ---");
 }
 
 MainWindow::~MainWindow()
 {
-    // Clean shutdown of thread
-    if (m_workerThread->isRunning()) {
-        m_workerThread->quit();
-        m_workerThread->wait();
-    }
+    // Bezpieczne zamykanie wątków
+    m_workerThread->quit();
+    m_workerThread->wait();
+    m_aiThread->quit();
+    m_aiThread->wait();
     delete ui;
+}
+
+// --- FUNKCJE POMOCNICZE ---
+
+void MainWindow::appendLog(const QString &message)
+{
+    QString timestamp = QDateTime::currentDateTime().toString("[HH:mm:ss] ");
+    ui->textEdit->append(timestamp + message);
+    // Auto-scroll na dół
+    QTextCursor c = ui->textEdit->textCursor();
+    c.movePosition(QTextCursor::End);
+    ui->textEdit->setTextCursor(c);
 }
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
-    // Sprawdź, czy zdarzenie pochodzi z naszego graphicsView_3
-    if (watched == ui->graphicsView_3)
-    {
-        // Sprawdź, czy zdarzenie to kółko myszy
-        if (event->type() == QEvent::Wheel)
-        {
-            // Rzutuj zdarzenie na QWheelEvent
-            QWheelEvent *wheelEvent = static_cast<QWheelEvent*>(event);
-
-            // Ustaw współczynnik zoomu
-            double scaleFactor = 1.15;
-
-            if (wheelEvent->angleDelta().y() > 0) {
-                // Kręcenie kółkiem w górę (do siebie) - Zoom In
-                ui->graphicsView_3->scale(scaleFactor, scaleFactor);
-            } else {
-                // Kręcenie kółkiem w dół (od siebie) - Zoom Out
-                ui->graphicsView_3->scale(1.0 / scaleFactor, 1.0 / scaleFactor);
-            }
-
-            // Zjedliśmy to zdarzenie - nie puszczaj go dalej
-            return true;
-        }
+    if (watched == ui->graphicsView_3 && event->type() == QEvent::Wheel) {
+        QWheelEvent *we = static_cast<QWheelEvent*>(event);
+        double scale = (we->angleDelta().y() > 0) ? 1.15 : (1.0 / 1.15);
+        ui->graphicsView_3->scale(scale, scale);
+        return true;
     }
-
-    // Przekaż wszystkie inne zdarzenia (jak kliknięcia itp.)
-    // do domyślnej obsługi
     return QMainWindow::eventFilter(watched, event);
 }
 
+// --- SLOTY GUI ---
 
 void MainWindow::on_DirectoryButton_clicked()
 {
-    // Użyj ostatnio wybranej ścieżki jako startowej, zamiast homePath
     QString startPath = m_dirModel->rootPath();
-
-    QString dirPath = QFileDialog::getExistingDirectory(this,
-                                                        tr("Wybierz folder"),
-                                                        startPath);
-    if (dirPath.isEmpty()) {
-        return;
-    }
-    else {
+    QString dirPath = QFileDialog::getExistingDirectory(this, tr("Wybierz folder"), startPath);
+    if (!dirPath.isEmpty()) {
         m_selectedDirectory = dirPath;
-        QMessageBox::information(this, "Directory Selected", "Selected: " + dirPath);
+        ui->progressBar->show();
+        ui->treeView->setRootIndex(m_dirModel->setRootPath(dirPath));
+        appendLog("Wybrano folder: " + dirPath);
     }
-
-    ui->progressBar->show();
-    ui->treeView->setRootIndex(m_dirModel->setRootPath(dirPath));
 }
 
-void MainWindow::onModelLoaded()
-{
-    ui->progressBar->hide();
-}
+void MainWindow::onModelLoaded() { ui->progressBar->hide(); }
 
 void MainWindow::on_treeView_clicked(const QModelIndex &index)
 {
-    // (Jeśli masz proxy, tu musi być mapowanie na sourceIndex)
-
-    // 1. Sprawdź, czy to plik, a nie folder
-    if (m_dirModel->isDir(index)) {
-        // Czyść stary obrazek, jeśli kliknięto na folder
-        m_pixmapItem->setPixmap(QPixmap());
-        m_scene->setSceneRect(m_scene->itemsBoundingRect()); // Zresetuj widok
-        return;
-    }
-
-    // 2. Pobierz pełną ścieżkę do pliku z modelu
+    if (m_dirModel->isDir(index)) return;
     QString filePath = m_dirModel->filePath(index);
-
-    // 3. Wczytaj obraz do obiektu QPixmap
     QPixmap pixmap(filePath);
-
-    // 4. Sprawdź, czy obraz wczytał się poprawnie
-    if (pixmap.isNull()) {
-        m_pixmapItem->setPixmap(QPixmap()); // Czyść w razie błędu
-        m_scene->setSceneRect(m_scene->itemsBoundingRect());
-        return;
+    if (!pixmap.isNull()) {
+        m_pixmapItem->setPixmap(pixmap);
+        ui->graphicsView_3->fitInView(m_pixmapItem, Qt::KeepAspectRatio);
     }
-
-    // 5. Zamiast ustawiać QLabel, podmień obrazek w naszym QGraphicsPixmapItem
-    m_pixmapItem->setPixmap(pixmap);
-
-    // 6. KLUCZOWY KROK: Powiedz widokowi, żeby automatycznie
-    //    dopasował zoom i pokazał cały obrazek
-    ui->graphicsView_3->fitInView(m_pixmapItem, Qt::KeepAspectRatio);
-
 }
 
-void MainWindow::on_actionO_programie_triggered()
-{
-    // Używamy standardowego okna dialogowego "About"
-    QMessageBox::about(this, // Rodzic (to okno)
-                       tr("O programie ImageTo3D"), // Tytuł okna
-                       tr("<h3>ImageTo3D Konwerter</h3>" // Tekst (można używać HTML)
-                          "<p>Projekt na przedmiot Grafika i GUI.</p>"
-                          "<p><b>Wersja:</b> %1</p>" // Użyjemy %1 jako "placeholder"
-                          "<p>Autorzy: Jakub Jasiński, Kamil Pojedynek, Kacper Ulanowski</p>")
-                           .arg(PROJECT_VERSION) // Wstaw wersję z config.h w miejsce %1
-                       );
-}
+// --- START (KLUCZOWA LOGIKA) ---
 
-// 2. YOUR TEST: Open all images with OpenCV (Button 2)
 void MainWindow::on_pushButton_2_clicked()
 {
     if (m_selectedDirectory.isEmpty()) {
-        QMessageBox::warning(this, "No Directory", "Please select a directory first (Button 1)!");
+        QMessageBox::warning(this, "Błąd", "Najpierw wybierz folder ze zdjęciami!");
         return;
     }
 
-    QDir dir(m_selectedDirectory);
-    QStringList filters;
-    filters << "*.png" << "*.jpg" << "*.jpeg";
-    dir.setNameFilters(filters);
-    QFileInfoList list = dir.entryInfoList();
-
-    if (list.isEmpty()) {
-        QMessageBox::warning(this, "No Images", "No images found in selected directory.");
+    // Sprawdź czy są zdjęcia
+    QDir imgDir(m_selectedDirectory);
+    if (imgDir.entryList(QStringList() << "*.jpg" << "*.png", QDir::Files).isEmpty()) {
+        QMessageBox::warning(this, "Brak zdjęć", "W wybranym folderze nie ma plików graficznych.");
         return;
     }
 
@@ -272,56 +178,52 @@ void MainWindow::on_pushButton_2_clicked()
     ui->progressBar->setRange(0, 100); // Ustaw na "spinner"
     ui->progressBar->show();
 
-    QDir imgDir(m_selectedDirectory);
-    QString folderName = imgDir.dirName();
-    imgDir.cdUp(); // Wyjdź piętro wyżej
-    QString workspace = imgDir.filePath(folderName + "_workspace");
-    // CRITICAL: Do NOT call m_manager->startReconstruction() directly!
-    // That would run it on the GUI thread.
-    // Instead, emit the signal:
-    emit requestReconstruction(m_selectedDirectory, workspace);
+    // Sprawdzamy wybór metody (comboBox_4 z Twojego UI)
+    // Index 0: Fotogrametria, Index 1: AI
+   QString selection = ui->comboBox_4->currentData().toString();
+
+    if (selection == "colmap") {
+        appendLog("Metoda: Fotogrametria");
+        QString folderName = imgDir.dirName();
+        imgDir.cdUp();
+        QString outputDir = imgDir.filePath(folderName + "_workspace");
+        emit requestReconstruction(m_selectedDirectory, outputDir);
+    } else {
+        // To jest ścieżka do modelu
+        appendLog("Metoda: AI (" + QFileInfo(selection).fileName() + ")");
+        // Przekazujemy ścieżkę modelu do workera
+        emit requestAiReconstruction(m_selectedDirectory, selection);
+    }
 }
 
-void MainWindow::onProgressUpdated(QString step, int percentage)
+// --- AKTUALIZACJA STANU ---
+
+void MainWindow::onProgressUpdated(QString msg, int percentage)
 {
-    // --- 1. OBSŁUGA LOGÓW (Z TIMESTAMPEM) ---
-    QString timestamp = QDateTime::currentDateTime().toString("[HH:mm:ss] ");
-    QString cleanMsg = step.trimmed();
-
-    // Dodajemy tekst tylko jeśli nie jest pusty
-    if (!cleanMsg.isEmpty()) {
-        QString finalLog = timestamp + cleanMsg;
-        ui->textEdit->append(finalLog);
-
-        // Wymuszenie przewinięcia na sam dół (Auto-scroll)
-        // Żeby użytkownik zawsze widział najnowszą linię
-        QTextCursor c = ui->textEdit->textCursor();
-        c.movePosition(QTextCursor::End);
-        ui->textEdit->setTextCursor(c);
+    // Logi
+    if (!msg.trimmed().isEmpty()) {
+        appendLog(msg.trimmed());
     }
 
-    // --- 2. OBSŁUGA PASKA POSTĘPU ---
+    // Pasek postępu
+    if (percentage < 0) return; // -1 = tylko tekst
 
-    if (percentage < 0) {
-        // WARTOŚĆ -1: Oznacza "Tylko loguj, nie zmieniaj paska".
-        // Jeśli pasek był w trybie spinnera (kręcił się), zostawiamy go.
-        return;
-    }
-
-    // WARTOŚĆ >= 0: Mamy konkretny procent.
-    
-    // Jeśli pasek jest w trybie "nieskończonym" (Range 0-0), 
-    // musimy go przełączyć na tryb procentowy (Range 0-100).
     if (ui->progressBar->maximum() == 0) {
-        ui->progressBar->setRange(0, 100);
+        ui->progressBar->setRange(0, 100); // Przełącz na tryb procentowy
     }
-
     ui->progressBar->setValue(percentage);
 }
+
 void MainWindow::onReconstructionFinished(QString modelPath)
 {
-    QMessageBox::information(this, "Success", "3D Model created at:\n" + modelPath);
+    ui->progressBar->hide();
+    ui->pushButton_2->setEnabled(true);
+    appendLog("--- SUKCES ---");
+    QMessageBox::information(this, "Gotowe", "Model 3D został utworzony:\n" + modelPath);
+}
 
+void MainWindow::onErrorOccurred(QString message)
+{
     ui->progressBar->hide();
     ui->progressBar->setRange(0, 0); // Ustaw na "spinner"
 }

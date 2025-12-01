@@ -1,4 +1,3 @@
-// MainWindow.h
 #ifndef MAINWINDOW_H
 #define MAINWINDOW_H
 
@@ -6,16 +5,15 @@
 #include <QModelIndex>
 #include <QEvent>
 #include <QDir>
-#include <QThread> // Include QThread
+#include <QThread>
+
+// --- INCLUDE NASZYCH SILNIKÓW ---
 #include "reconstructionmanager.h"
+#include "ai_reconstructionmanager.h" // Nowa klasa ONNX Runtime
 
-
-// --- ZMIANY TUTAJ ---
-// Deklaracje zapowiadające
 class QFileSystemModel;
 class QGraphicsScene;
 class QGraphicsPixmapItem;
-// (usuń deklaracje proxy, jeśli wróciłeś do QFileSystemModel)
 
 namespace Ui {
 class MainWindow;
@@ -30,9 +28,11 @@ public:
     ~MainWindow();
 
 signals:
-    // This signal will trigger the worker thread to start
+    // Sygnał dla COLMAP (wymaga ścieżki wyjściowej, bo tworzymy ją w GUI)
     void requestReconstruction(const QString &imagesPath, const QString &outputPath);
-
+    
+    // Sygnał dla AI (AI samo tworzy swój folder roboczy "_ai_workspace")
+    void requestAiReconstruction(const QString &imagesPath, const QString &modelPath);
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -40,35 +40,37 @@ protected:
 private slots:
     void on_DirectoryButton_clicked();
     void onModelLoaded();
-
-    // Ten slot zostaje bez zmian
     void on_treeView_clicked(const QModelIndex &index);
-
     void on_actionO_programie_triggered();
-
-
-    // Slot for YOUR TEST (Connect this to pushButton_2 in .ui)
+    void refreshModelList(); 
+    // Przycisk START
     void on_pushButton_2_clicked();
 
-    // Updates from the background manager
+    // Wspólne sloty aktualizacji
     void onProgressUpdated(QString step, int percentage);
     void onReconstructionFinished(QString modelPath);
+    void onErrorOccurred(QString message);
 
+    // Funkcja pomocnicza do logowania
+    void appendLog(const QString &message);
 
 private:
     Ui::MainWindow *ui;
-    QFileSystemModel *m_dirModel; // Zakładam, że masz jeden model
-
-    // The logic handler
-    ReconstructionManager *m_manager;
-    QThread *m_workerThread; // The thread instance
-
-    // Store the selected path
+    
+    QFileSystemModel *m_dirModel;
     QString m_selectedDirectory;
 
-    // --- NOWE ZMIENNE ---
+    // Silnik 1: COLMAP
+    ReconstructionManager *m_manager;
+    QThread *m_workerThread;
+
+    // Silnik 2: AI (ONNX Runtime)
+    AIReconstructionManager *m_aiManager;
+    QThread *m_aiThread;
+
+    // Grafika 2D
     QGraphicsScene *m_scene;
-    QGraphicsPixmapItem *m_pixmapItem; // Obrazek, który będziemy podmieniać
+    QGraphicsPixmapItem *m_pixmapItem;
 };
 
-#endif // MainWindow_H
+#endif // MAINWINDOW_H
