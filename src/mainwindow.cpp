@@ -152,11 +152,30 @@ void MainWindow::on_pushButton_2_clicked()
         return;
     }
 
-    // Blokada GUI
-    ui->pushButton_2->setEnabled(false);
-    ui->textEdit->clear();
-    appendLog("--- START PROCESU ---");
-    ui->progressBar->setRange(0, 0); // Spinner
+    // Loop through images and show them
+    // for (const QFileInfo &fileInfo : list) {
+    //     std::string path = fileInfo.absoluteFilePath().toStdString();
+
+    //     // OpenCV Read
+    //     cv::Mat img = cv::imread(path);
+
+    //     if (img.empty()) {
+    //         qDebug() << "Failed to load:" << fileInfo.fileName();
+    //         continue;
+    //     }
+
+    //     // OpenCV Show (Creates a popup window)
+    //     cv::imshow("Test Preview (Press any key for next)", img);
+
+    //     // Wait 500ms or until key press
+    //     cv::waitKey(500);
+    // }
+    // cv::destroyAllWindows();
+    //QMessageBox::information(this, "Test Complete", "Finished displaying images.");
+
+    if (m_selectedDirectory.isEmpty()) return;
+
+    ui->progressBar->setRange(0, 100); // Ustaw na "spinner"
     ui->progressBar->show();
 
     // Sprawdzamy wybór metody (comboBox_4 z Twojego UI)
@@ -206,36 +225,5 @@ void MainWindow::onReconstructionFinished(QString modelPath)
 void MainWindow::onErrorOccurred(QString message)
 {
     ui->progressBar->hide();
-    ui->pushButton_2->setEnabled(true);
-    appendLog("!!! BŁĄD: " + message);
-    QMessageBox::critical(this, "Błąd", message);
-}
-
-void MainWindow::on_actionO_programie_triggered()
-{
-    QMessageBox::about(this, "O programie", 
-        "ImageTo3D\nProjekt studencki: Grafika i GUI\nWersja: " PROJECT_VERSION);
-}
-void MainWindow::refreshModelList()
-{
-    // comboBox_4 = Wybór metody (Fotogrametria / AI)
-    ui->comboBox_4->clear();
-    
-    // 1. Opcja stała
-    ui->comboBox_4->addItem("Fotogrametria (COLMAP)", "colmap");
-
-    // 2. Skanowanie folderu z modelami
-    QString modelsPath = QCoreApplication::applicationDirPath() + "/models";
-    QDir dir(modelsPath);
-    QStringList filters; filters << "*.onnx";
-    QFileInfoList files = dir.entryInfoList(filters, QDir::Files);
-
-    if (files.isEmpty()) {
-        appendLog("Info: Brak modeli ONNX w " + modelsPath);
-    }
-
-    for (const QFileInfo &fi : files) {
-        // Tekst: AI (nazwa pliku), Data: pełna ścieżka do modelu
-        ui->comboBox_4->addItem("AI: " + fi.fileName(), fi.absoluteFilePath());
-    }
+    ui->progressBar->setRange(0, 0); // Ustaw na "spinner"
 }
