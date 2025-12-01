@@ -1,6 +1,6 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
-#include "config.h" 
+#include "config.h"
 
 #include <QFileDialog>
 #include <QFileSystemModel>
@@ -15,7 +15,7 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
     , m_dirModel(new QFileSystemModel(this))
-    // Inicjalizacja managerów (bez rodzica, bo idą do wątków)
+    // Inicjalizacja managerów
     , m_manager(new ReconstructionManager())
     , m_workerThread(new QThread(this))
     , m_aiManager(new AIReconstructionManager())
@@ -25,7 +25,36 @@ MainWindow::MainWindow(QWidget *parent)
     , m_pixmapItem(new QGraphicsPixmapItem())
 {
     ui->setupUi(this);
+    
+    // === KONFIGURACJA GUI ===
+    if (ui->menu_Widok) {
+        ui->menu_Widok->addAction(ui->inputDockWidget->toggleViewAction());
+        ui->menu_Widok->addAction(ui->logDockWidget->toggleViewAction());
+    }
+
+    m_dirModel->setFilter(QDir::NoDotAndDotDot | QDir::AllDirs | QDir::Files);
+    m_dirModel->setNameFilters(QStringList() << "*.jpg" << "*.jpeg" << "*.png");
+    m_dirModel->setNameFilterDisables(false);
+    ui->treeView->setModel(m_dirModel);
+    for (int i = 1; i < 4; ++i) ui->treeView->hideColumn(i);
+    ui->treeView->setRootIndex(m_dirModel->setRootPath("/app"));
+    
+    connect(m_dirModel, &QFileSystemModel::directoryLoaded, this, &MainWindow::onModelLoaded);
+
+    m_scene->addItem(m_pixmapItem);
+    ui->graphicsView_3->setScene(m_scene);
+    ui->graphicsView_3->setDragMode(QGraphicsView::ScrollHandDrag);
+    ui->graphicsView_3->setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
+    ui->graphicsView_3->setResizeAnchor(QGraphicsView::AnchorUnderMouse);
+    ui->graphicsView_3->setRenderHint(QPainter::Antialiasing);
+    ui->graphicsView_3->installEventFilter(this);
+
+    // Wypełnienie listy modeli (TERAZ TO ZADZIAŁA, BO FUNKCJA JEST NA KOŃCU PLIKU)
     refreshModelList();
+
+    ui->textEdit->setReadOnly(true);
+    appendLog("--- Gotowy do pracy ---");
+
     // === KONFIGURACJA WĄTKU 1: COLMAP ===
     m_manager->moveToThread(m_workerThread);
     connect(this, &MainWindow::requestReconstruction, m_manager, &ReconstructionManager::startReconstruction);
@@ -38,47 +67,15 @@ MainWindow::MainWindow(QWidget *parent)
     // === KONFIGURACJA WĄTKU 2: AI (ONNX) ===
     m_aiManager->moveToThread(m_aiThread);
     connect(this, &MainWindow::requestAiReconstruction, m_aiManager, &AIReconstructionManager::startAI);
-    // Używamy tych samych slotów do GUI, bo interfejs jest wspólny
     connect(m_aiManager, &AIReconstructionManager::progressUpdated, this, &MainWindow::onProgressUpdated);
     connect(m_aiManager, &AIReconstructionManager::finished, this, &MainWindow::onReconstructionFinished);
     connect(m_aiManager, &AIReconstructionManager::errorOccurred, this, &MainWindow::onErrorOccurred);
     connect(m_aiThread, &QThread::finished, m_aiManager, &QObject::deleteLater);
     m_aiThread->start();
-
-    // === KONFIGURACJA GUI ===
-    
-    // Docki w menu
-    if (ui->menu_Widok) {
-        ui->menu_Widok->addAction(ui->inputDockWidget->toggleViewAction());
-        ui->menu_Widok->addAction(ui->logDockWidget->toggleViewAction());
-    }
-
-    // Drzewo plików
-    m_dirModel->setFilter(QDir::NoDotAndDotDot | QDir::AllDirs | QDir::Files);
-    m_dirModel->setNameFilters(QStringList() << "*.jpg" << "*.jpeg" << "*.png");
-    m_dirModel->setNameFilterDisables(false);
-    ui->treeView->setModel(m_dirModel);
-    for (int i = 1; i < 4; ++i) ui->treeView->hideColumn(i);
-    ui->treeView->setRootIndex(m_dirModel->setRootPath("/app"));
-    connect(m_dirModel, &QFileSystemModel::directoryLoaded, this, &MainWindow::onModelLoaded);
-
-    // Graphics View
-    m_scene->addItem(m_pixmapItem);
-    ui->graphicsView_3->setScene(m_scene);
-    ui->graphicsView_3->setDragMode(QGraphicsView::ScrollHandDrag);
-    ui->graphicsView_3->setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
-    ui->graphicsView_3->setResizeAnchor(QGraphicsView::AnchorUnderMouse);
-    ui->graphicsView_3->setRenderHint(QPainter::Antialiasing);
-    ui->graphicsView_3->installEventFilter(this);
-
-    // Logi
-    ui->textEdit->setReadOnly(true);
-    appendLog("--- Gotowy do pracy ---");
 }
 
 MainWindow::~MainWindow()
 {
-    // Bezpieczne zamykanie wątków
     m_workerThread->quit();
     m_workerThread->wait();
     m_aiThread->quit();
@@ -92,7 +89,6 @@ void MainWindow::appendLog(const QString &message)
 {
     QString timestamp = QDateTime::currentDateTime().toString("[HH:mm:ss] ");
     ui->textEdit->append(timestamp + message);
-    // Auto-scroll na dół
     QTextCursor c = ui->textEdit->textCursor();
     c.movePosition(QTextCursor::End);
     ui->textEdit->setTextCursor(c);
@@ -145,42 +141,21 @@ void MainWindow::on_pushButton_2_clicked()
         return;
     }
 
-    // Sprawdź czy są zdjęcia
     QDir imgDir(m_selectedDirectory);
     if (imgDir.entryList(QStringList() << "*.jpg" << "*.png", QDir::Files).isEmpty()) {
         QMessageBox::warning(this, "Brak zdjęć", "W wybranym folderze nie ma plików graficznych.");
         return;
     }
 
-    // Loop through images and show them
-    // for (const QFileInfo &fileInfo : list) {
-    //     std::string path = fileInfo.absoluteFilePath().toStdString();
-
-    //     // OpenCV Read
-    //     cv::Mat img = cv::imread(path);
-
-    //     if (img.empty()) {
-    //         qDebug() << "Failed to load:" << fileInfo.fileName();
-    //         continue;
-    //     }
-
-    //     // OpenCV Show (Creates a popup window)
-    //     cv::imshow("Test Preview (Press any key for next)", img);
-
-    //     // Wait 500ms or until key press
-    //     cv::waitKey(500);
-    // }
-    // cv::destroyAllWindows();
-    //QMessageBox::information(this, "Test Complete", "Finished displaying images.");
-
-    if (m_selectedDirectory.isEmpty()) return;
-
-    ui->progressBar->setRange(0, 100); // Ustaw na "spinner"
+    // Blokada GUI
+    ui->pushButton_2->setEnabled(false);
+    ui->textEdit->clear();
+    appendLog("--- START PROCESU ---");
+    ui->progressBar->setRange(0, 0); // Spinner
     ui->progressBar->show();
 
-    // Sprawdzamy wybór metody (comboBox_4 z Twojego UI)
-    // Index 0: Fotogrametria, Index 1: AI
-   QString selection = ui->comboBox_4->currentData().toString();
+    // Logika wyboru
+    QString selection = ui->comboBox_4->currentData().toString();
 
     if (selection == "colmap") {
         appendLog("Metoda: Fotogrametria");
@@ -189,9 +164,7 @@ void MainWindow::on_pushButton_2_clicked()
         QString outputDir = imgDir.filePath(folderName + "_workspace");
         emit requestReconstruction(m_selectedDirectory, outputDir);
     } else {
-        // To jest ścieżka do modelu
         appendLog("Metoda: AI (" + QFileInfo(selection).fileName() + ")");
-        // Przekazujemy ścieżkę modelu do workera
         emit requestAiReconstruction(m_selectedDirectory, selection);
     }
 }
@@ -200,12 +173,10 @@ void MainWindow::on_pushButton_2_clicked()
 
 void MainWindow::onProgressUpdated(QString msg, int percentage)
 {
-    // Logi
     if (!msg.trimmed().isEmpty()) {
         appendLog(msg.trimmed());
     }
 
-    // Pasek postępu
     if (percentage < 0) return; // -1 = tylko tekst
 
     if (ui->progressBar->maximum() == 0) {
@@ -225,5 +196,38 @@ void MainWindow::onReconstructionFinished(QString modelPath)
 void MainWindow::onErrorOccurred(QString message)
 {
     ui->progressBar->hide();
-    ui->progressBar->setRange(0, 0); // Ustaw na "spinner"
+    ui->pushButton_2->setEnabled(true);
+    appendLog("!!! BŁĄD: " + message);
+    QMessageBox::critical(this, "Błąd", message);
+}
+
+// --- TEJ FUNKCJI BRAKOWAŁO ---
+void MainWindow::on_actionO_programie_triggered()
+{
+    QMessageBox::about(this, "O programie", 
+        "ImageTo3D\nProjekt studencki: Grafika i GUI\nWersja: " PROJECT_VERSION);
+}
+
+// --- TEJ TEŻ BRAKOWAŁO ---
+void MainWindow::refreshModelList()
+{
+    ui->comboBox_4->clear();
+    
+    // Opcja 1: COLMAP (Zawsze)
+    ui->comboBox_4->addItem("Fotogrametria (COLMAP)", "colmap");
+
+    // Opcja 2+: Modele AI z folderu
+    QString modelsPath = QCoreApplication::applicationDirPath() + "/models";
+    QDir dir(modelsPath);
+    QStringList filters; filters << "*.onnx";
+    QFileInfoList files = dir.entryInfoList(filters, QDir::Files);
+
+    if (files.isEmpty()) {
+        appendLog("Info: Brak modeli ONNX w " + modelsPath);
+    }
+
+    for (const QFileInfo &fi : files) {
+        // Tekst: "AI: [Nazwa]", Data: Pełna ścieżka
+        ui->comboBox_4->addItem("AI: " + fi.fileName(), fi.absoluteFilePath());
+    }
 }
