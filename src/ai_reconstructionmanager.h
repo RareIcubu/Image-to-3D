@@ -29,16 +29,22 @@ private:
         float x, y, z;
         uint8_t r, g, b;
     };
+    enum ModelType{
+        MiDaS,
+        DPT,
+        UNKNOWN
+    };
     bool loadModel(const QString &path);
     cv::Mat runInference(const cv::Mat &img);
     bool saveDepthAsPNG(const QString &path, const cv::Mat &depth32f);
     bool savePointCloudPLY(const QString &path, const std::vector<Point3D> &points);
+    void analyzeDepthMap(const cv::Mat& depth);
 private:
     bool m_modelLoaded = false;
     QString m_currentModelPath;
     QElapsedTimer m_timer;
 
-   
+    ModelType m_modelType = UNKNOWN;
 
     std::shared_ptr<Ort::Env> m_ortEnv;
     std::shared_ptr<Ort::Session> m_session;

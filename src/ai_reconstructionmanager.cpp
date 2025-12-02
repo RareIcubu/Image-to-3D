@@ -3,10 +3,14 @@
 #include <QDir>
 #include <QCoreApplication>
 #include <fstream>
-#include <opencv2/dnn.hpp> 
+#include <opencv2/dnn.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/highgui.hpp>
+#include <algorithm> // dla std::max, std::min
 
 AIReconstructionManager::AIReconstructionManager(QObject *parent) : QObject(parent) {
     m_modelLoaded = false;
+    // Ustawiamy poziom logowania ORT
     m_ortEnv = std::make_shared<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "ImageTo3D_AI");
 }
 
@@ -24,25 +28,25 @@ bool AIReconstructionManager::loadModel(const QString &modelPath) {
         emit progressUpdated("Ładowanie modelu: " + QFileInfo(modelPath).fileName(), 1);
 
         Ort::SessionOptions sessionOptions;
-        sessionOptions.SetIntraOpNumThreads(1); 
+        sessionOptions.SetIntraOpNumThreads(1);
         sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
 
         m_session = std::make_shared<Ort::Session>(*m_ortEnv, modelPath.toStdString().c_str(), sessionOptions);
 
         // Detekcja wejść/wyjść i rozmiaru
         Ort::AllocatorWithDefaultOptions allocator;
-        
+
         m_inputNameStrings.clear();
         m_outputNameStrings.clear();
         m_inputNames.clear();
         m_outputNames.clear();
 
-        // Wejście (zakładamy 1)
+        // Wejście
         auto inName = m_session->GetInputNameAllocated(0, allocator);
         m_inputNameStrings.push_back(inName.get());
         m_inputNames.push_back(m_inputNameStrings.back().c_str());
 
-        // Wyjście (zakładamy 1)
+        // Wyjście
         auto outName = m_session->GetOutputNameAllocated(0, allocator);
         m_outputNameStrings.push_back(outName.get());
         m_outputNames.push_back(m_outputNameStrings.back().c_str());
@@ -53,10 +57,20 @@ bool AIReconstructionManager::loadModel(const QString &modelPath) {
         auto dims = tensorInfo.GetShape();
 
         if (dims.size() >= 4) {
-            // Jeśli dynamiczny (-1), ustaw domyślnie 384, w przeciwnym razie weź z modelu
+            // Jeśli dynamiczny (-1), ustaw domyślnie 384
             m_inputHeight = (dims[2] > 0) ? dims[2] : 384;
             m_inputWidth  = (dims[3] > 0) ? dims[3] : 384;
             qDebug() << "ORT: Wykryto rozdzielczość:" << m_inputWidth << "x" << m_inputHeight;
+        }
+
+        // Detekcja typu modelu (dla logów, bo normalizację zrobimy uniwersalną)
+        QString fileName = QFileInfo(modelPath).fileName().toLower();
+        if (fileName.contains("dpt")) {
+            m_modelType = DPT;
+        } else if (fileName.contains("midas")) {
+            m_modelType = MiDaS;
+        } else {
+            m_modelType = UNKNOWN;
         }
 
         m_modelLoaded = true;
@@ -74,12 +88,15 @@ bool AIReconstructionManager::loadModel(const QString &modelPath) {
 cv::Mat AIReconstructionManager::runInference(const cv::Mat &img) {
     if (!m_modelLoaded) return cv::Mat();
 
-    // Preprocessing
+    // 1. Preprocessing
     cv::Mat imgRGB, imgResized;
     cv::cvtColor(img, imgRGB, cv::COLOR_BGR2RGB);
     cv::resize(imgRGB, imgResized, cv::Size(m_inputWidth, m_inputHeight), 0, 0, cv::INTER_CUBIC);
-    
+
+    // Normalizacja do [0,1]
     imgResized.convertTo(imgResized, CV_32F, 1.0f / 255.0f);
+
+    // Dla DPT i MiDaS często stosuje się normalizację ImageNet
     cv::Scalar mean(0.485, 0.456, 0.406);
     cv::Scalar std(0.229, 0.224, 0.225);
     imgResized = (imgResized - mean) / std;
@@ -96,29 +113,51 @@ cv::Mat AIReconstructionManager::runInference(const cv::Mat &img) {
     );
 
     try {
+        // 2. Inferencja
         auto outputTensors = m_session->Run(
             Ort::RunOptions{nullptr}, m_inputNames.data(), &inputTensor, 1, m_outputNames.data(), 1
         );
 
         float* floatArr = outputTensors.front().GetTensorMutableData<float>();
         cv::Mat depthMap(m_inputHeight, m_inputWidth, CV_32F, floatArr);
+
+        // 3. UNIWERSALNA NORMALIZACJA (Klucz do sukcesu)
+        // Sprowadzamy wszystko do zakresu 0.0 (daleko/tło) - 1.0 (blisko).
+        // Dzięki temu algorytm generowania punktów zawsze działa tak samo.
         
+        double minVal, maxVal;
+        cv::minMaxLoc(depthMap, &minVal, &maxVal);
+        
+        cv::Mat depthNormalized;
+        if (maxVal - minVal > 1e-6) {
+            // Wzór: (val - min) / (max - min)
+            depthMap.convertTo(depthNormalized, CV_32F, 1.0f / (maxVal - minVal), -minVal / (maxVal - minVal));
+        } else {
+            depthNormalized = cv::Mat::zeros(depthMap.size(), CV_32F);
+        }
+
+        // Resize do oryginału
         cv::Mat depthFinal;
-        cv::resize(depthMap, depthFinal, img.size(), 0, 0, cv::INTER_CUBIC);
+        cv::resize(depthNormalized, depthFinal, img.size(), 0, 0, cv::INTER_CUBIC);
+
         return depthFinal.clone();
-    } catch (...) { return cv::Mat(); }
+
+    } catch (const std::exception& e) {
+        qCritical() << "Inference error:" << e.what();
+        return cv::Mat();
+    } catch (...) {
+        qCritical() << "Unknown inference error";
+        return cv::Mat();
+    }
 }
 
 bool AIReconstructionManager::saveDepthAsPNG(const QString &path, const cv::Mat &depth32f) {
-    double minVal, maxVal;
-    cv::minMaxLoc(depth32f, &minVal, &maxVal);
+    // Zapisujemy jako 8-bitowy obrazek do podglądu
     cv::Mat depth8u;
-    if (maxVal > minVal) depth32f.convertTo(depth8u, CV_8U, 255.0/(maxVal-minVal), -minVal*255.0/(maxVal-minVal));
-    else depth8u = cv::Mat::zeros(depth32f.size(), CV_8U);
+    depth32f.convertTo(depth8u, CV_8U, 255.0); // Skoro depth32f jest 0..1, to *255 daje 0..255
     return cv::imwrite(path.toStdString(), depth8u);
 }
 
-// --- 1. Poprawiona funkcja zapisu (Kolorowe PLY) ---
 bool AIReconstructionManager::savePointCloudPLY(const QString &path, const std::vector<Point3D> &points)
 {
     std::ofstream ofs(path.toStdString(), std::ios::binary);
@@ -130,36 +169,40 @@ bool AIReconstructionManager::savePointCloudPLY(const QString &path, const std::
     ofs << "property float x\n";
     ofs << "property float y\n";
     ofs << "property float z\n";
-    // Kluczowe dla koloru: definicja właściwości RGB
     ofs << "property uchar red\n";
     ofs << "property uchar green\n";
     ofs << "property uchar blue\n";
     ofs << "end_header\n";
 
     for (const auto &p : points) {
-        // Rzutujemy kolory na int, żeby strumień zapisał je jako liczby (np. "255"), 
-        // a nie jako znaki ASCII.
-        ofs << p.x << " " << p.y << " " << p.z << " " 
+        ofs << p.x << " " << p.y << " " << p.z << " "
             << (int)p.r << " " << (int)p.g << " " << (int)p.b << "\n";
     }
+    ofs.close();
     return true;
 }
 
-// --- 2. Poprawiona funkcja główna (Lepsza skala + Kolory) ---
+void AIReconstructionManager::analyzeDepthMap(const cv::Mat& depth) {
+    double minVal, maxVal;
+    cv::minMaxLoc(depth, &minVal, &maxVal);
+    cv::Scalar mean, stddev;
+    cv::meanStdDev(depth, mean, stddev);
+    qDebug() << "Depth Stats -> Min:" << minVal << "Max:" << maxVal << "Mean:" << mean[0];
+}
+
 void AIReconstructionManager::startAI(const QString &imagesPath, const QString &modelPath)
 {
     m_timer.restart();
     
-    // --- SETUP FOLDERÓW ---
+    // --- Foldery ---
     QDir sourceDir(imagesPath);
     QString folderName = sourceDir.dirName();
-    sourceDir.cdUp(); 
+    sourceDir.cdUp();
     QString workspacePath = sourceDir.filePath(folderName + "_ai_workspace");
     QDir().mkpath(workspacePath);
-    
-    emit progressUpdated("Workspace: " + workspacePath, 0);
-    qDebug() << "AI Workspace:" << workspacePath; // Log do terminala
 
+    emit progressUpdated("Workspace: " + workspacePath, 0);
+    
     if (!loadModel(modelPath)) return;
 
     QDir imgDir(imagesPath);
@@ -173,9 +216,8 @@ void AIReconstructionManager::startAI(const QString &imagesPath, const QString &
     for (int i = 0; i < total; ++i) {
         QFileInfo fi = files[i];
         QString msg = QString("AI [%1/%2]: %3").arg(i+1).arg(total).arg(fi.fileName());
-        
-        emit progressUpdated(msg, -1); // Do GUI
-        qDebug() << qPrintable(msg);   // Do terminala
+        emit progressUpdated(msg, -1);
+        qDebug() << qPrintable(msg);
 
         cv::Mat img = cv::imread(fi.absoluteFilePath().toStdString());
         if (img.empty()) continue;
@@ -183,43 +225,52 @@ void AIReconstructionManager::startAI(const QString &imagesPath, const QString &
         cv::Mat imgRGB;
         cv::cvtColor(img, imgRGB, cv::COLOR_BGR2RGB);
 
+        // Inferencja (zwraca znormalizowane 0..1)
         cv::Mat depth = runInference(img);
         if (depth.empty()) continue;
-
+        
+        analyzeDepthMap(depth);
         saveDepthAsPNG(workspacePath + "/" + fi.completeBaseName() + "_depth.png", depth);
 
-        // --- GENEROWANIE CHMURY (POPRAWIONE) ---
+        // --- GENEROWANIE CHMURY 3D ---
         std::vector<Point3D> currentPoints;
 
-        // Skala głębi:
-        // MiDaS zwraca odwrotność głębi. Wartości mogą być duże.
-        // X i Y to piksele (np. 0..4000).
-        // Żeby proporcje były naturalne, Z też musi być w okolicach 0..4000, a nie 100000.
-        // Ustawiamy mnożnik, który "uspokaja" głębię.
-        float depthFactor = 500.0f; 
+        float centerX = depth.cols / 2.0f;
+        float centerY = depth.rows / 2.0f;
+
+        // --- PARAMETRY SKALOWANIA (TWEAK THIS!) ---
+        // Focal length: Większa = mniejszy kąt widzenia, mniejsze zniekształcenia X/Y
+        float focalLength = 1000.0f; 
+        
+        // Depth Scale: To decyduje o "wypukłości". 
+        // Skoro d jest 0..1, a obraz ma np. 4000px, to Z musi być duże, żeby było widać.
+        float depthScale = 2000.0f; 
 
         for (int y = 0; y < depth.rows; y += m_subsample) {
             for (int x = 0; x < depth.cols; x += m_subsample) {
-                float d = depth.at<float>(y, x);
-                
-                // Odsiewamy tło
-                if (d < 0.0001) continue; 
+                float d = depth.at<float>(y, x); // Wartość 0.0 - 1.0
 
-                // POPRAWNA MATEMATYKA:
-                // X i Y zostawiamy w pikselach (duże liczby)
-                float px = (float)x;
-                float py = (float)y;
-                
-                // Z skalujemy w dół, żeby pasowało do X i Y
-                float pz = (1.0f / d) * depthFactor;
+                // Odsiewamy tło (np. wszystko co ma wartość mniejszą niż 0.1)
+                if (d < 0.1f) continue; 
 
-                // Opcjonalnie: Obetnij sufit (zbyt dalekie punkty), żeby nie było "igieł"
-                if (pz > 5000.0f) pz = 5000.0f;
+                // Obliczamy Z
+                // d to "relative inverse depth" (1=blisko, 0=daleko)
+                // Dodajemy mały epsilon, żeby nie dzielić przez 0
+                float Z = (1.0f / (d + 0.01f)) * depthScale;
+                
+                // CLAMP: Obcinamy sufit, żeby tło nie uciekało w nieskończoność
+                // Jeśli depthScale=2000, to dla d=0.1 -> Z = 20000. To za dużo.
+                if (Z > 5000.0f) Z = 5000.0f;
+
+                // Rzutowanie perspektywiczne (Inverse Pinhole)
+                // To naprawia proporcje X/Y względem odległości
+                float X = (x - centerX) * Z / focalLength;
+                float Y = (y - centerY) * Z / focalLength;
 
                 Point3D p;
-                p.x = px;
-                p.y = py;
-                p.z = pz;
+                p.x = X;
+                p.y = Y;
+                p.z = Z; // Zwróć uwagę: Z rośnie w głąb (dla OpenGL -Z, tu +Z jest OK)
 
                 cv::Vec3b color = imgRGB.at<cv::Vec3b>(y, x);
                 p.r = color[0];
@@ -238,5 +289,5 @@ void AIReconstructionManager::startAI(const QString &imagesPath, const QString &
     }
 
     emit finished(workspacePath);
-    qDebug() << "AI Finished. Saved in:" << workspacePath;
+    qDebug() << "AI Finished.";
 }
