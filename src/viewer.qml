@@ -36,7 +36,8 @@ Rectangle {
             GridGeometry {
                 horizontalLines: 20
                 verticalLines: 20
-                step: 10
+                horizontalStep: 10
+                verticalStep: 10
             }
         }
     }

@@ -33,7 +33,7 @@ CMD ["sleep", "infinity"]
 
 # ETAP 2: BUILDER
 FROM base AS builder
-COPY src/ /app/src/
+COPY --chown=devuser:devgroup src/ /app/src/
 WORKDIR /app/src/
 RUN rm -rf build && mkdir build && cd build && \
     cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release && ninja
@@ -45,25 +45,40 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ >/etc/timezone
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     libqt6widgets6 libqt6gui6 libqt6core6 libqt6core5compat6 \
+    \
     # --- ADD THESE LINES ---
     qml6-module-qtquick \
     qml6-module-qtquick-window \
     qml6-module-qtquick-controls \
     qml6-module-qtquick-layouts \
-    qml6-module-qtquick3d \
-    qml6-module-qtquick3d-helpers \
+
     qml6-module-qtqml-workerscript \
     libqt6quick3d6 \
     libqt6opengl6 \
     # -----------------------
+    \
     colmap x11-apps libx11-6 libgl1 \
     libopencv-core4.5d libopencv-imgproc4.5d libopencv-imgcodecs4.5d libopencv-dnn4.5d \
     libopencv-calib3d4.5d libopencv-features2d4.5d \
     && rm -rf /var/lib/apt/lists/*
 
+# 2. --- THE FIX: Force Copy QML and Plugins from Builder ---
+# Since the builder has the 'dev' packages, it definitely has the files.
+COPY --from=builder /usr/lib/x86_64-linux-gnu/qt6/qml /usr/lib/x86_64-linux-gnu/qt6/qml
+COPY --from=builder /usr/lib/x86_64-linux-gnu/qt6/plugins /usr/lib/x86_64-linux-gnu/qt6/plugins
+
+
 # Kopiowanie bibliotek ONNX Runtime
 COPY --from=base /usr/local/lib/libonnxruntime.so* /usr/local/lib/
 RUN ldconfig
+
+# 4. Environment Variables (Crucial for finding the copied files)
+ENV QML2_IMPORT_PATH=/usr/lib/x86_64-linux-gnu/qt6/qml
+ENV QML_IMPORT_PATH=/usr/lib/x86_64-linux-gnu/qt6/qml
+ENV QT_PLUGIN_PATH=/usr/lib/x86_64-linux-gnu/qt6/plugins
+ENV XDG_RUNTIME_DIR=/tmp/runtime-app
+RUN mkdir -p /tmp/runtime-app && chmod 777 /tmp/runtime-app
+
 
 RUN useradd -ms /bin/bash appuser
 USER appuser
@@ -71,5 +86,16 @@ WORKDIR /home/appuser
 COPY --from=builder /app/src/build/ImageTo3D .
 # Kopiujemy modele do obrazu produkcyjnego
 COPY src/models ./models
+
+# 1. Tell Qt where to find the QML modules (The "Module not installed" fix)
+ENV QML2_IMPORT_PATH=/usr/lib/x86_64-linux-gnu/qt6/qml
+ENV QML_IMPORT_PATH=/usr/lib/x86_64-linux-gnu/qt6/qml
+
+# 2. Tell Qt where to find the backend C++ plugins (Good practice)
+ENV QT_PLUGIN_PATH=/usr/lib/x86_64-linux-gnu/qt6/plugins
+
+# 3. Fix the XDG warning (Optional, but prevents crashes related to shader caching)
+ENV XDG_RUNTIME_DIR=/tmp/runtime-qt
+RUN mkdir -p /tmp/runtime-qt && chmod 700 /tmp/runtime-qt
 
 CMD ["./ImageTo3D"]

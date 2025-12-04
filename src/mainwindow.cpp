@@ -242,6 +242,21 @@ void MainWindow::setup3DView()
     // Make sure you named it "view3DWidget" in the .ui file!
     QQuickWidget *view = ui->view3DWidget;
 
+    // --- ADD THIS BLOCK ---
+    // 1. Get the QML Engine
+    QQmlEngine *engine = view->engine();
+
+    // 2. Explicitly add the system path where apt installed the modules
+    // This covers standard Intel/AMD Linux
+    engine->addImportPath("/usr/lib/x86_64-linux-gnu/qt6/qml");
+
+    // (Optional) Backup for ARM (like Mac M1/M2 running Docker)
+    engine->addImportPath("/usr/lib/aarch64-linux-gnu/qt6/qml");
+
+    // 3. Debug: Print paths to see where it is actually looking
+    qDebug() << "Active Import Paths:" << engine->importPathList();
+    // ----------------------
+
     // 2. Set Resize Mode (Important so the 3D view stretches)
     view->setResizeMode(QQuickWidget::SizeRootObjectToView);
 
