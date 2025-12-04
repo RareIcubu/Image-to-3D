@@ -10,6 +10,9 @@
 #include <QWheelEvent>
 #include <QDateTime>
 #include <QDebug>
+#include <QQmlContext>
+#include <QQmlEngine>
+#include <QQuickItem>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -25,6 +28,7 @@ MainWindow::MainWindow(QWidget *parent)
     , m_pixmapItem(new QGraphicsPixmapItem())
 {
     ui->setupUi(this);
+    setup3DView();
     
     // === KONFIGURACJA GUI ===
     if (ui->menu_Widok) {
@@ -231,3 +235,54 @@ void MainWindow::refreshModelList()
         ui->comboBox_4->addItem("AI: " + fi.fileName(), fi.absoluteFilePath());
     }
 }
+
+void MainWindow::setup3DView()
+{
+    // 1. Locate the widget you added in Designer
+    // Make sure you named it "view3DWidget" in the .ui file!
+    QQuickWidget *view = ui->view3DWidget;
+
+    // 2. Set Resize Mode (Important so the 3D view stretches)
+    view->setResizeMode(QQuickWidget::SizeRootObjectToView);
+
+    // 3. Load the QML source
+    // "qrc:/viewer.qml" if you use resource system, or explicit path for testing
+    // For now, let's assume it's a local file for easy testing:
+    view->setSource(QUrl::fromLocalFile("viewer.qml"));
+
+    // Check for errors
+    if (view->status() == QQuickWidget::Error) {
+        for (const auto &error : view->errors()) {
+            qDebug() << error.toString();
+        }
+    }
+}
+
+void MainWindow::on_pushButton_clicked()
+{
+    // 1. Open the File Dialog
+    QString fileName = QFileDialog::getOpenFileName(this,
+                                                    tr("Open 3D Model"),
+                                                    QDir::homePath(),
+                                                    tr("3D Files (*.obj *.fbx *.gltf *.glb)"));
+
+    if (fileName.isEmpty())
+        return;
+
+    // 2. Convert path to URL format (Required for QML)
+    // C:/Models/car.obj -> file:///C:/Models/car.obj
+    QUrl fileUrl = QUrl::fromLocalFile(fileName);
+
+    // 3. Get the Root Object of your QML scene
+    QQuickItem *rootObject = ui->view3DWidget->rootObject();
+
+    if (rootObject) {
+        // 4. Call the JavaScript function 'loadModel' defined in your QML
+        QMetaObject::invokeMethod(rootObject, "loadModel",
+                                  Q_ARG(QVariant, fileUrl.toString()));
+    } else {
+        qWarning() << "Root object not found! Is the QML loaded?";
+    }
+
+}
+

@@ -11,7 +11,7 @@ project(ImageTo3D VERSION ${APP_VERSION} LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Widgets Core5Compat)
+find_package(Qt6 REQUIRED COMPONENTS Widgets Core5Compat Quick Quick3D QuickWidgets)
 find_package(OpenCV REQUIRED)
 
 # Znajdź ONNX Runtime
@@ -48,6 +48,7 @@ add_executable(ImageTo3D
     reconstructionmanager.h
     ai_reconstructionmanager.cpp
     ai_reconstructionmanager.h
+    viewer.qml
     
     # --- WAŻNE: Dodajemy pliki konfiguracyjne do targetu ---
     # Dzięki temu CMake "wie", że projekt zależy od nich.
@@ -61,4 +62,13 @@ target_link_libraries(ImageTo3D PRIVATE
     Qt6::Core5Compat
     ${OpenCV_LIBS}
     ${ONNX_LIB}
+    Qt6::Quick
+    Qt6::Quick3D
+    Qt6::QuickWidgets
+)
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/viewer.qml"
+    "${CMAKE_CURRENT_BINARY_DIR}/viewer.qml"
+    COPYONLY
 )

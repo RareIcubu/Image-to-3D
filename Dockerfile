@@ -5,9 +5,10 @@ ENV TZ=Europe/Warsaw
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ >/etc/timezone
 
 # Instalacja narzędzi (OpenCV 4.5.4 z APT)
+# dodane qt6-declarative-dev qt6-quick3d-dev libqt6opengl6-dev libqt6shadertools6-dev qt6-quick3d-dev-tools
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     build-essential cmake ninja-build git pkg-config wget unzip ca-certificates \
-    qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools libqt6core5compat6-dev \
+    qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools libqt6core5compat6-dev qt6-declarative-dev qt6-quick3d-dev libqt6opengl6-dev libqt6shadertools6-dev qt6-quick3d-dev-tools \
     colmap meshlab x11-apps libx11-dev libgl1-mesa-dev \
     libopencv-dev python3-dev python3-numpy \
     && rm -rf /var/lib/apt/lists/*
@@ -44,6 +45,17 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ >/etc/timezone
 
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
     libqt6widgets6 libqt6gui6 libqt6core6 libqt6core5compat6 \
+    # --- ADD THESE LINES ---
+    qml6-module-qtquick \
+    qml6-module-qtquick-window \
+    qml6-module-qtquick-controls \
+    qml6-module-qtquick-layouts \
+    qml6-module-qtquick3d \
+    qml6-module-qtquick3d-helpers \
+    qml6-module-qtqml-workerscript \
+    libqt6quick3d6 \
+    libqt6opengl6 \
+    # -----------------------
     colmap x11-apps libx11-6 libgl1 \
     libopencv-core4.5d libopencv-imgproc4.5d libopencv-imgcodecs4.5d libopencv-dnn4.5d \
     libopencv-calib3d4.5d libopencv-features2d4.5d \
