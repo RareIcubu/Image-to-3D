@@ -10,6 +10,11 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools libqt6core5compat6-dev \
     colmap meshlab x11-apps libx11-dev libgl1-mesa-dev \
     libopencv-dev python3-dev python3-numpy \
+    # --- NEW: Qt3D Dependencies ---
+    qt6-3d-dev \
+    libqt6opengl6-dev \
+    libqt6shadertools6-dev \
+    # ------------------------------
     && rm -rf /var/lib/apt/lists/*
 
 # Instalacja ONNX Runtime 1.17.1
@@ -47,6 +52,9 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
     colmap x11-apps libx11-6 libgl1 \
     libopencv-core4.5d libopencv-imgproc4.5d libopencv-imgcodecs4.5d libopencv-dnn4.5d \
     libopencv-calib3d4.5d libopencv-features2d4.5d \
+    qt6-3d-dev \
+    libqt6opengl6-dev \
+    libqt6shadertools6-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Kopiowanie bibliotek ONNX Runtime

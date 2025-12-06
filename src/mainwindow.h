@@ -6,6 +6,7 @@
 #include <QEvent>
 #include <QDir>
 #include <QThread>
+#include "ModelViewer.h" // Include the viewer header
 
 // --- INCLUDE NASZYCH SILNIKÓW ---
 #include "reconstructionmanager.h"
@@ -46,6 +47,9 @@ private slots:
     // Przycisk START
     void on_pushButton_2_clicked();
 
+    // Slot to load model into the tab
+    void on_showModel_clicked();
+
     // Wspólne sloty aktualizacji
     void onProgressUpdated(QString step, int percentage);
     void onReconstructionFinished(QString modelPath);
@@ -71,6 +75,9 @@ private:
     // Grafika 2D
     QGraphicsScene *m_scene;
     QGraphicsPixmapItem *m_pixmapItem;
+
+    // The embedded 3D Viewer
+    ModelViewer *m_modelViewer;
 };
 
 #endif // MAINWINDOW_H

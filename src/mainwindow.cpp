@@ -10,6 +10,7 @@
 #include <QWheelEvent>
 #include <QDateTime>
 #include <QDebug>
+#include <QVBoxLayout> // Required for embedding
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -72,6 +73,33 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_aiManager, &AIReconstructionManager::errorOccurred, this, &MainWindow::onErrorOccurred);
     connect(m_aiThread, &QThread::finished, m_aiManager, &QObject::deleteLater);
     m_aiThread->start();
+
+    // --- 1. Setup 3D Viewer in Existing Tab ---
+
+    // Create the viewer
+    // We set 'this' as parent initially, layout will handle reparenting
+    m_modelViewer = new ModelViewer(this);
+
+    // We target the widget inside the tab, usually named 'tab_3d_page' (or similar in your UI)
+    QWidget *targetTab = ui->tab_3d_page;
+
+    if (targetTab) {
+        // FIX for "Attempting to add QLayout" error:
+        // Check if the tab already has a layout (created in Designer)
+        if (targetTab->layout() != nullptr) {
+            // If layout exists, use it. This makes the viewer expand to fill the tab.
+            targetTab->layout()->addWidget(m_modelViewer);
+        } else {
+            // If no layout exists, create a new one
+            QVBoxLayout *layout = new QVBoxLayout(targetTab);
+            layout->setContentsMargins(0, 0, 0, 0); // Remove margins for full immersion
+            layout->addWidget(m_modelViewer);
+        }
+    } else {
+        // Fallback: If we couldn't find the tab by name
+        qDebug() << "Could not find 'tab_3d_page' in UI. Adding new tab instead.";
+        ui->tabWidget->addTab(m_modelViewer, "3D View");
+    }
 }
 
 MainWindow::~MainWindow()
@@ -191,6 +219,11 @@ void MainWindow::onReconstructionFinished(QString modelPath)
     ui->pushButton_2->setEnabled(true);
     appendLog("--- SUKCES ---");
     QMessageBox::information(this, "Gotowe", "Model 3D został utworzony:\n" + modelPath);
+    m_modelViewer->loadModel(modelPath);
+
+    if (ui->tab_3d_page) {
+        ui->tabWidget->setCurrentWidget(ui->tab_3d_page);
+    }
 }
 
 void MainWindow::onErrorOccurred(QString message)
@@ -229,5 +262,25 @@ void MainWindow::refreshModelList()
     for (const QFileInfo &fi : files) {
         // Tekst: "AI: [Nazwa]", Data: Pełna ścieżka
         ui->comboBox_4->addItem("AI: " + fi.fileName(), fi.absoluteFilePath());
+    }
+}
+
+// NOTE: This function name 'on_showModel_clicked' uses Qt's auto-connection naming convention.
+// If you see "No matching signal for on_showModel_clicked", it means you don't have a button
+// named "showModel" in your .ui file, or you renamed it.
+// You can ignore the warning if you call this manually, or rename the button in Qt Designer.
+void MainWindow::on_showModel_clicked() {
+    QString fileName = QFileDialog::getOpenFileName(this,
+                                                    "Open 3D Model",
+                                                    m_selectedDirectory.isEmpty() ? QDir::homePath() : m_selectedDirectory,
+                                                    "3D Files (*.obj *.ply *.fbx *.stl)");
+
+    if (fileName.isEmpty()) return;
+
+    m_modelViewer->loadModel(fileName);
+
+    // Switch to the tab containing the viewer
+    if (ui->tab_3d_page) {
+        ui->tabWidget->setCurrentWidget(ui->tab_3d_page);
     }
 }
