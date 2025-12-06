@@ -13,24 +13,25 @@
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickItem>
+#include <QProcess>
+#include <QDirIterator>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
     , m_dirModel(new QFileSystemModel(this))
-    // Inicjalizacja managerów
     , m_manager(new ReconstructionManager())
     , m_workerThread(new QThread(this))
     , m_aiManager(new AIReconstructionManager())
     , m_aiThread(new QThread(this))
-    // Grafika
     , m_scene(new QGraphicsScene(this))
     , m_pixmapItem(new QGraphicsPixmapItem())
 {
     ui->setupUi(this);
-    setup3DView();
     
-    // === KONFIGURACJA GUI ===
+    // To jest funkcja, której brakowało:
+    setup3DView();
+
     if (ui->menu_Widok) {
         ui->menu_Widok->addAction(ui->inputDockWidget->toggleViewAction());
         ui->menu_Widok->addAction(ui->logDockWidget->toggleViewAction());
@@ -42,7 +43,7 @@ MainWindow::MainWindow(QWidget *parent)
     ui->treeView->setModel(m_dirModel);
     for (int i = 1; i < 4; ++i) ui->treeView->hideColumn(i);
     ui->treeView->setRootIndex(m_dirModel->setRootPath("/app"));
-    
+
     connect(m_dirModel, &QFileSystemModel::directoryLoaded, this, &MainWindow::onModelLoaded);
 
     m_scene->addItem(m_pixmapItem);
@@ -53,13 +54,11 @@ MainWindow::MainWindow(QWidget *parent)
     ui->graphicsView_3->setRenderHint(QPainter::Antialiasing);
     ui->graphicsView_3->installEventFilter(this);
 
-    // Wypełnienie listy modeli (TERAZ TO ZADZIAŁA, BO FUNKCJA JEST NA KOŃCU PLIKU)
     refreshModelList();
 
     ui->textEdit->setReadOnly(true);
     appendLog("--- Gotowy do pracy ---");
 
-    // === KONFIGURACJA WĄTKU 1: COLMAP ===
     m_manager->moveToThread(m_workerThread);
     connect(this, &MainWindow::requestReconstruction, m_manager, &ReconstructionManager::startReconstruction);
     connect(m_manager, &ReconstructionManager::progressUpdated, this, &MainWindow::onProgressUpdated);
@@ -68,7 +67,6 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_workerThread, &QThread::finished, m_manager, &QObject::deleteLater);
     m_workerThread->start();
 
-    // === KONFIGURACJA WĄTKU 2: AI (ONNX) ===
     m_aiManager->moveToThread(m_aiThread);
     connect(this, &MainWindow::requestAiReconstruction, m_aiManager, &AIReconstructionManager::startAI);
     connect(m_aiManager, &AIReconstructionManager::progressUpdated, this, &MainWindow::onProgressUpdated);
@@ -87,7 +85,27 @@ MainWindow::~MainWindow()
     delete ui;
 }
 
-// --- FUNKCJE POMOCNICZE ---
+void MainWindow::setup3DView()
+{
+    QQuickWidget *view = ui->view3DWidget;
+    QQmlEngine *engine = view->engine();
+    
+    // Ważne dla Dockera/Linuxa - ścieżka do modułów QML
+    engine->addImportPath("/usr/lib/x86_64-linux-gnu/qt6/qml");
+
+    view->setResizeMode(QQuickWidget::SizeRootObjectToView);
+    view->setSource(QUrl::fromLocalFile("viewer.qml"));
+
+    // --- KLUCZOWE DLA DZIAŁANIA KLAWIATURY (WASD) ---
+    view->setFocusPolicy(Qt::StrongFocus);
+    view->setAttribute(Qt::WA_Hover);
+    view->setFocus();
+    // ------------------------------------------------
+
+    if (view->status() == QQuickWidget::Error) {
+        for (const auto &error : view->errors()) qDebug() << error.toString();
+    }
+}
 
 void MainWindow::appendLog(const QString &message)
 {
@@ -108,8 +126,6 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
     }
     return QMainWindow::eventFilter(watched, event);
 }
-
-// --- SLOTY GUI ---
 
 void MainWindow::on_DirectoryButton_clicked()
 {
@@ -136,8 +152,6 @@ void MainWindow::on_treeView_clicked(const QModelIndex &index)
     }
 }
 
-// --- START (KLUCZOWA LOGIKA) ---
-
 void MainWindow::on_pushButton_2_clicked()
 {
     if (m_selectedDirectory.isEmpty()) {
@@ -151,14 +165,12 @@ void MainWindow::on_pushButton_2_clicked()
         return;
     }
 
-    // Blokada GUI
     ui->pushButton_2->setEnabled(false);
     ui->textEdit->clear();
     appendLog("--- START PROCESU ---");
-    ui->progressBar->setRange(0, 0); // Spinner
+    ui->progressBar->setRange(0, 0); 
     ui->progressBar->show();
 
-    // Logika wyboru
     QString selection = ui->comboBox_4->currentData().toString();
 
     if (selection == "colmap") {
@@ -173,19 +185,11 @@ void MainWindow::on_pushButton_2_clicked()
     }
 }
 
-// --- AKTUALIZACJA STANU ---
-
 void MainWindow::onProgressUpdated(QString msg, int percentage)
 {
-    if (!msg.trimmed().isEmpty()) {
-        appendLog(msg.trimmed());
-    }
-
-    if (percentage < 0) return; // -1 = tylko tekst
-
-    if (ui->progressBar->maximum() == 0) {
-        ui->progressBar->setRange(0, 100); // Przełącz na tryb procentowy
-    }
+    if (!msg.trimmed().isEmpty()) appendLog(msg.trimmed());
+    if (percentage < 0) return;
+    if (ui->progressBar->maximum() == 0) ui->progressBar->setRange(0, 100);
     ui->progressBar->setValue(percentage);
 }
 
@@ -195,6 +199,13 @@ void MainWindow::onReconstructionFinished(QString modelPath)
     ui->pushButton_2->setEnabled(true);
     appendLog("--- SUKCES ---");
     QMessageBox::information(this, "Gotowe", "Model 3D został utworzony:\n" + modelPath);
+    
+    // Automatyczne ładowanie wyniku
+    QUrl fileUrl = QUrl::fromLocalFile(modelPath);
+    QQuickItem *rootObject = ui->view3DWidget->rootObject();
+    if (rootObject) {
+         QMetaObject::invokeMethod(rootObject, "loadModel", Q_ARG(QVariant, fileUrl.toString()));
+    }
 }
 
 void MainWindow::onErrorOccurred(QString message)
@@ -205,99 +216,73 @@ void MainWindow::onErrorOccurred(QString message)
     QMessageBox::critical(this, "Błąd", message);
 }
 
-// --- TEJ FUNKCJI BRAKOWAŁO ---
 void MainWindow::on_actionO_programie_triggered()
 {
-    QMessageBox::about(this, "O programie", 
-        "ImageTo3D\nProjekt studencki: Grafika i GUI\nWersja: " PROJECT_VERSION);
+    QMessageBox::about(this, "O programie", "ImageTo3D\nWersja: " PROJECT_VERSION);
 }
 
-// --- TEJ TEŻ BRAKOWAŁO ---
 void MainWindow::refreshModelList()
 {
     ui->comboBox_4->clear();
-    
-    // Opcja 1: COLMAP (Zawsze)
     ui->comboBox_4->addItem("Fotogrametria (COLMAP)", "colmap");
-
-    // Opcja 2+: Modele AI z folderu
     QString modelsPath = QCoreApplication::applicationDirPath() + "/models";
     QDir dir(modelsPath);
     QStringList filters; filters << "*.onnx";
     QFileInfoList files = dir.entryInfoList(filters, QDir::Files);
-
-    if (files.isEmpty()) {
-        appendLog("Info: Brak modeli ONNX w " + modelsPath);
-    }
-
     for (const QFileInfo &fi : files) {
-        // Tekst: "AI: [Nazwa]", Data: Pełna ścieżka
         ui->comboBox_4->addItem("AI: " + fi.fileName(), fi.absoluteFilePath());
     }
 }
 
-void MainWindow::setup3DView()
-{
-    // 1. Locate the widget you added in Designer
-    // Make sure you named it "view3DWidget" in the .ui file!
-    QQuickWidget *view = ui->view3DWidget;
-
-    // --- ADD THIS BLOCK ---
-    // 1. Get the QML Engine
-    QQmlEngine *engine = view->engine();
-
-    // 2. Explicitly add the system path where apt installed the modules
-    // This covers standard Intel/AMD Linux
-    engine->addImportPath("/usr/lib/x86_64-linux-gnu/qt6/qml");
-
-    // (Optional) Backup for ARM (like Mac M1/M2 running Docker)
-    engine->addImportPath("/usr/lib/aarch64-linux-gnu/qt6/qml");
-
-    // 3. Debug: Print paths to see where it is actually looking
-    qDebug() << "Active Import Paths:" << engine->importPathList();
-    // ----------------------
-
-    // 2. Set Resize Mode (Important so the 3D view stretches)
-    view->setResizeMode(QQuickWidget::SizeRootObjectToView);
-
-    // 3. Load the QML source
-    // "qrc:/viewer.qml" if you use resource system, or explicit path for testing
-    // For now, let's assume it's a local file for easy testing:
-    view->setSource(QUrl::fromLocalFile("viewer.qml"));
-
-    // Check for errors
-    if (view->status() == QQuickWidget::Error) {
-        for (const auto &error : view->errors()) {
-            qDebug() << error.toString();
-        }
-    }
-}
-
+// --- FUNKCJA ŁADOWANIA MODELU Z KONWERSJĄ ---
 void MainWindow::on_pushButton_clicked()
 {
-    // 1. Open the File Dialog
     QString fileName = QFileDialog::getOpenFileName(this,
                                                     tr("Open 3D Model"),
                                                     QDir::homePath(),
-                                                    tr("3D Files (*.obj *.fbx *.gltf *.glb)"));
+                                                    tr("3D Files (*.obj *.ply *.fbx *.glb *.gltf *.stl *.dae *.3ds);;All Files (*)"));
 
-    if (fileName.isEmpty())
-        return;
+    if (fileName.isEmpty()) return;
 
-    // 2. Convert path to URL format (Required for QML)
-    // C:/Models/car.obj -> file:///C:/Models/car.obj
-    QUrl fileUrl = QUrl::fromLocalFile(fileName);
+    QString finalPath = fileName;
+    QFileInfo fi(fileName);
+    QString ext = fi.suffix().toLower();
 
-    // 3. Get the Root Object of your QML scene
+    // Jeśli format nie jest natywny dla Qt Quick 3D (GLB/GLTF), konwertujemy
+    if (ext != "glb" && ext != "gltf") {
+        appendLog("Konwersja modelu " + ext + " do GLB...");
+        
+        QString outputDir = QDir::tempPath() + "/qt_model_conversion";
+        QDir().mkpath(outputDir);
+        
+        // UNIKALNA NAZWA (Timestamp) - Naprawia problem z cache
+        QString timestamp = QString::number(QDateTime::currentMSecsSinceEpoch());
+        QString outputFile = outputDir + "/model_" + timestamp + ".glb";
+
+        QProcess converter;
+        converter.start("assimp", QStringList() << "export" << fileName << outputFile);
+        
+        if (!converter.waitForFinished(30000)) {
+            appendLog("Błąd: Timeout konwersji assimp.");
+            return;
+        }
+
+        if (converter.exitCode() != 0) {
+            appendLog("Błąd konwersji: " + converter.readAllStandardError());
+        } else {
+            if (QFile::exists(outputFile)) {
+                finalPath = outputFile;
+                appendLog("Konwersja udana: " + finalPath);
+            }
+        }
+    }
+
+    QUrl fileUrl = QUrl::fromLocalFile(finalPath);
     QQuickItem *rootObject = ui->view3DWidget->rootObject();
 
     if (rootObject) {
-        // 4. Call the JavaScript function 'loadModel' defined in your QML
-        QMetaObject::invokeMethod(rootObject, "loadModel",
-                                  Q_ARG(QVariant, fileUrl.toString()));
-    } else {
-        qWarning() << "Root object not found! Is the QML loaded?";
+        // Przywróć focus do widgetu, żeby WASD/Suwaki działały po kliknięciu przycisku
+        ui->view3DWidget->setFocus(); 
+        QMetaObject::invokeMethod(rootObject, "loadModel", Q_ARG(QVariant, fileUrl.toString()));
     }
-
 }
-

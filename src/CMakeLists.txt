@@ -49,7 +49,7 @@ add_executable(ImageTo3D
     ai_reconstructionmanager.cpp
     ai_reconstructionmanager.h
     viewer.qml
-    
+    ModelLoader.qml    
     # --- WAŻNE: Dodajemy pliki konfiguracyjne do targetu ---
     # Dzięki temu CMake "wie", że projekt zależy od nich.
     # Jeśli zmienisz numer w version.txt, CMake automatycznie przebuduje config.h!
@@ -67,8 +67,16 @@ target_link_libraries(ImageTo3D PRIVATE
     Qt6::QuickWidgets
 )
 
+# --- POPRAWKA: Kopiuj viewer.qml ---
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/viewer.qml"
     "${CMAKE_CURRENT_BINARY_DIR}/viewer.qml"
+    COPYONLY
+)
+
+# --- POPRAWKA: Kopiuj TEŻ ModelLoader.qml (Tego brakowało!) ---
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/ModelLoader.qml"
+    "${CMAKE_CURRENT_BINARY_DIR}/ModelLoader.qml"
     COPYONLY
 )
