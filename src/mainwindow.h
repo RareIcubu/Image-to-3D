@@ -54,6 +54,9 @@ private slots:
     // Funkcja pomocnicza do logowania
     void appendLog(const QString &message);
 
+    // Dark Mode
+    void toggleTheme();
+
 private:
     Ui::MainWindow *ui;
     
@@ -71,6 +74,10 @@ private:
     // Grafika 2D
     QGraphicsScene *m_scene;
     QGraphicsPixmapItem *m_pixmapItem;
+
+    // Dark Mode
+    bool m_darkMode = true;
+    QAction *m_actionToggleTheme = nullptr;
 };
 
 #endif // MAINWINDOW_H

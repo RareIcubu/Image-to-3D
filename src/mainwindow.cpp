@@ -1,4 +1,6 @@
 #include "mainwindow.h"
+#include "Theme.h"
+#include <QAction>
 #include "ui_mainwindow.h"
 #include "config.h"
 
@@ -72,6 +74,17 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_aiManager, &AIReconstructionManager::errorOccurred, this, &MainWindow::onErrorOccurred);
     connect(m_aiThread, &QThread::finished, m_aiManager, &QObject::deleteLater);
     m_aiThread->start();
+
+    // === DARK MODE ===
+
+    m_actionToggleTheme = new QAction(tr("Włącz tryb jasny"), this);
+    m_actionToggleTheme->setCheckable(false);
+    connect(m_actionToggleTheme, &QAction::triggered, this, &MainWindow::toggleTheme);
+
+    if (ui->menu_Widok) {
+        ui->menu_Widok->addSeparator();
+        ui->menu_Widok->addAction(m_actionToggleTheme);
+    }
 }
 
 MainWindow::~MainWindow()
@@ -81,6 +94,27 @@ MainWindow::~MainWindow()
     m_aiThread->quit();
     m_aiThread->wait();
     delete ui;
+}
+
+// --- DARK MODE ---
+
+void MainWindow::toggleTheme()
+{
+    // Toggle flag
+    m_darkMode = !m_darkMode;
+
+    if (m_darkMode) {
+        // switch to dark
+        Theme::applyDarkPalette(*qobject_cast<QApplication*>(QApplication::instance()));
+        if (m_actionToggleTheme) m_actionToggleTheme->setText(tr("Włącz tryb jasny"));
+    } else {
+        // switch to light
+        Theme::applyLightPalette(*qobject_cast<QApplication*>(QApplication::instance()));
+        if (m_actionToggleTheme) m_actionToggleTheme->setText(tr("Włącz tryb ciemny"));
+    }
+
+    // Force UI refresh
+    qApp->processEvents();
 }
 
 // --- FUNKCJE POMOCNICZE ---
