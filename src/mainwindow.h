@@ -6,6 +6,7 @@
 #include <QEvent>
 #include <QDir>
 #include <QThread>
+#include <QQuickWidget>
 
 // --- INCLUDE NASZYCH SILNIKÓW ---
 #include "reconstructionmanager.h"
@@ -53,12 +54,15 @@ private slots:
 
     // Funkcja pomocnicza do logowania
     void appendLog(const QString &message);
+    // Wybranie i odpalenie podgladu modelu 3d z pliku .obj
+    void on_pushButton_clicked();
 
     // Dark Mode
     void toggleTheme();
 
 private:
     Ui::MainWindow *ui;
+    void setup3DView(); // Helper function
     
     QFileSystemModel *m_dirModel;
     QString m_selectedDirectory;

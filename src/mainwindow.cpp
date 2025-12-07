@@ -12,23 +12,28 @@
 #include <QWheelEvent>
 #include <QDateTime>
 #include <QDebug>
+#include <QQmlContext>
+#include <QQmlEngine>
+#include <QQuickItem>
+#include <QProcess>
+#include <QDirIterator>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
     , m_dirModel(new QFileSystemModel(this))
-    // Inicjalizacja managerów
     , m_manager(new ReconstructionManager())
     , m_workerThread(new QThread(this))
     , m_aiManager(new AIReconstructionManager())
     , m_aiThread(new QThread(this))
-    // Grafika
     , m_scene(new QGraphicsScene(this))
     , m_pixmapItem(new QGraphicsPixmapItem())
 {
     ui->setupUi(this);
-    
-    // === KONFIGURACJA GUI ===
+
+    // Konfiguracja widoku 3D
+    setup3DView();
+
     if (ui->menu_Widok) {
         ui->menu_Widok->addAction(ui->inputDockWidget->toggleViewAction());
         ui->menu_Widok->addAction(ui->logDockWidget->toggleViewAction());
@@ -40,7 +45,7 @@ MainWindow::MainWindow(QWidget *parent)
     ui->treeView->setModel(m_dirModel);
     for (int i = 1; i < 4; ++i) ui->treeView->hideColumn(i);
     ui->treeView->setRootIndex(m_dirModel->setRootPath("/app"));
-    
+
     connect(m_dirModel, &QFileSystemModel::directoryLoaded, this, &MainWindow::onModelLoaded);
 
     m_scene->addItem(m_pixmapItem);
@@ -51,13 +56,11 @@ MainWindow::MainWindow(QWidget *parent)
     ui->graphicsView_3->setRenderHint(QPainter::Antialiasing);
     ui->graphicsView_3->installEventFilter(this);
 
-    // Wypełnienie listy modeli (TERAZ TO ZADZIAŁA, BO FUNKCJA JEST NA KOŃCU PLIKU)
     refreshModelList();
 
     ui->textEdit->setReadOnly(true);
     appendLog("--- Gotowy do pracy ---");
 
-    // === KONFIGURACJA WĄTKU 1: COLMAP ===
     m_manager->moveToThread(m_workerThread);
     connect(this, &MainWindow::requestReconstruction, m_manager, &ReconstructionManager::startReconstruction);
     connect(m_manager, &ReconstructionManager::progressUpdated, this, &MainWindow::onProgressUpdated);
@@ -66,7 +69,6 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_workerThread, &QThread::finished, m_manager, &QObject::deleteLater);
     m_workerThread->start();
 
-    // === KONFIGURACJA WĄTKU 2: AI (ONNX) ===
     m_aiManager->moveToThread(m_aiThread);
     connect(this, &MainWindow::requestAiReconstruction, m_aiManager, &AIReconstructionManager::startAI);
     connect(m_aiManager, &AIReconstructionManager::progressUpdated, this, &MainWindow::onProgressUpdated);
@@ -96,6 +98,26 @@ MainWindow::~MainWindow()
     delete ui;
 }
 
+void MainWindow::setup3DView()
+{
+    QQuickWidget *view = ui->view3DWidget;
+    QQmlEngine *engine = view->engine();
+
+    // Importy dla środowiska Linux/Docker
+    engine->addImportPath("/usr/lib/x86_64-linux-gnu/qt6/qml");
+
+    view->setResizeMode(QQuickWidget::SizeRootObjectToView);
+    view->setSource(QUrl::fromLocalFile("viewer.qml"));
+
+    // --- Obsługa klawiatury (WASD) ---
+    view->setFocusPolicy(Qt::StrongFocus);
+    view->setAttribute(Qt::WA_Hover);
+    view->setFocus();
+    
+    if (view->status() == QQuickWidget::Error) {
+        for (const auto &error : view->errors()) qDebug() << error.toString();
+    }
+}
 // --- DARK MODE ---
 
 void MainWindow::toggleTheme()
@@ -139,8 +161,6 @@ bool MainWindow::eventFilter(QObject *watched, QEvent *event)
     return QMainWindow::eventFilter(watched, event);
 }
 
-// --- SLOTY GUI ---
-
 void MainWindow::on_DirectoryButton_clicked()
 {
     QString startPath = m_dirModel->rootPath();
@@ -166,8 +186,6 @@ void MainWindow::on_treeView_clicked(const QModelIndex &index)
     }
 }
 
-// --- START (KLUCZOWA LOGIKA) ---
-
 void MainWindow::on_pushButton_2_clicked()
 {
     if (m_selectedDirectory.isEmpty()) {
@@ -181,14 +199,12 @@ void MainWindow::on_pushButton_2_clicked()
         return;
     }
 
-    // Blokada GUI
     ui->pushButton_2->setEnabled(false);
     ui->textEdit->clear();
     appendLog("--- START PROCESU ---");
-    ui->progressBar->setRange(0, 0); // Spinner
+    ui->progressBar->setRange(0, 0);
     ui->progressBar->show();
 
-    // Logika wyboru
     QString selection = ui->comboBox_4->currentData().toString();
 
     if (selection == "colmap") {
@@ -203,19 +219,11 @@ void MainWindow::on_pushButton_2_clicked()
     }
 }
 
-// --- AKTUALIZACJA STANU ---
-
 void MainWindow::onProgressUpdated(QString msg, int percentage)
 {
-    if (!msg.trimmed().isEmpty()) {
-        appendLog(msg.trimmed());
-    }
-
-    if (percentage < 0) return; // -1 = tylko tekst
-
-    if (ui->progressBar->maximum() == 0) {
-        ui->progressBar->setRange(0, 100); // Przełącz na tryb procentowy
-    }
+    if (!msg.trimmed().isEmpty()) appendLog(msg.trimmed());
+    if (percentage < 0) return;
+    if (ui->progressBar->maximum() == 0) ui->progressBar->setRange(0, 100);
     ui->progressBar->setValue(percentage);
 }
 
@@ -225,6 +233,13 @@ void MainWindow::onReconstructionFinished(QString modelPath)
     ui->pushButton_2->setEnabled(true);
     appendLog("--- SUKCES ---");
     QMessageBox::information(this, "Gotowe", "Model 3D został utworzony:\n" + modelPath);
+
+    // Automatyczne ładowanie wyniku
+    QUrl fileUrl = QUrl::fromLocalFile(modelPath);
+    QQuickItem *rootObject = ui->view3DWidget->rootObject();
+    if (rootObject) {
+         QMetaObject::invokeMethod(rootObject, "loadModel", Q_ARG(QVariant, fileUrl.toString()));
+    }
 }
 
 void MainWindow::onErrorOccurred(QString message)
@@ -235,33 +250,73 @@ void MainWindow::onErrorOccurred(QString message)
     QMessageBox::critical(this, "Błąd", message);
 }
 
-// --- TEJ FUNKCJI BRAKOWAŁO ---
 void MainWindow::on_actionO_programie_triggered()
 {
-    QMessageBox::about(this, "O programie", 
-        "ImageTo3D\nProjekt studencki: Grafika i GUI\nWersja: " PROJECT_VERSION);
+    QMessageBox::about(this, "O programie", "ImageTo3D\nWersja: " PROJECT_VERSION);
 }
 
-// --- TEJ TEŻ BRAKOWAŁO ---
 void MainWindow::refreshModelList()
 {
     ui->comboBox_4->clear();
-    
-    // Opcja 1: COLMAP (Zawsze)
     ui->comboBox_4->addItem("Fotogrametria (COLMAP)", "colmap");
-
-    // Opcja 2+: Modele AI z folderu
     QString modelsPath = QCoreApplication::applicationDirPath() + "/models";
     QDir dir(modelsPath);
     QStringList filters; filters << "*.onnx";
     QFileInfoList files = dir.entryInfoList(filters, QDir::Files);
+    for (const QFileInfo &fi : files) {
+        ui->comboBox_4->addItem("AI: " + fi.fileName(), fi.absoluteFilePath());
+    }
+}
 
-    if (files.isEmpty()) {
-        appendLog("Info: Brak modeli ONNX w " + modelsPath);
+// --- ŁADOWANIE MODELU Z KONWERSJĄ ASSIMP ---
+void MainWindow::on_pushButton_clicked()
+{
+    QString fileName = QFileDialog::getOpenFileName(this,
+                                                    tr("Open 3D Model"),
+                                                    QDir::homePath(),
+                                                    tr("3D Files (*.obj *.ply *.fbx *.glb *.gltf *.stl *.dae *.3ds);;All Files (*)"));
+
+    if (fileName.isEmpty()) return;
+
+    QString finalPath = fileName;
+    QFileInfo fi(fileName);
+    QString ext = fi.suffix().toLower();
+
+    // Konwersja na GLB dla Qt Quick 3D
+    if (ext != "glb" && ext != "gltf") {
+        appendLog("Konwersja modelu " + ext + " do GLB...");
+
+        QString outputDir = QDir::tempPath() + "/qt_model_conversion";
+        QDir().mkpath(outputDir);
+
+        // Timestamp dla unikalności (cache busting)
+        QString timestamp = QString::number(QDateTime::currentMSecsSinceEpoch());
+        QString outputFile = outputDir + "/model_" + timestamp + ".glb";
+
+        QProcess converter;
+        // Assimp musi być w PATH
+        converter.start("assimp", QStringList() << "export" << fileName << outputFile);
+
+        if (!converter.waitForFinished(30000)) {
+            appendLog("Błąd: Timeout konwersji assimp.");
+            return;
+        }
+
+        if (converter.exitCode() != 0) {
+            appendLog("Błąd konwersji: " + converter.readAllStandardError());
+        } else {
+            if (QFile::exists(outputFile)) {
+                finalPath = outputFile;
+                appendLog("Konwersja udana: " + finalPath);
+            }
+        }
     }
 
-    for (const QFileInfo &fi : files) {
-        // Tekst: "AI: [Nazwa]", Data: Pełna ścieżka
-        ui->comboBox_4->addItem("AI: " + fi.fileName(), fi.absoluteFilePath());
+    QUrl fileUrl = QUrl::fromLocalFile(finalPath);
+    QQuickItem *rootObject = ui->view3DWidget->rootObject();
+
+    if (rootObject) {
+        ui->view3DWidget->setFocus();
+        QMetaObject::invokeMethod(rootObject, "loadModel", Q_ARG(QVariant, fileUrl.toString()));
     }
 }

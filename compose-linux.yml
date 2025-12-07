@@ -9,6 +9,8 @@ services:
 
       # --- KONFIGURACJA NVIDIA ---
       # 'all' udostępnia: compute, utility, graphics (OpenGL), display
+    devices:
+      - /dev/dri:/dev/dri
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
 
