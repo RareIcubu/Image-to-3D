@@ -60,6 +60,9 @@ private slots:
     // Dark Mode
     void toggleTheme();
 
+    // The slot that triggers when you click the menu item
+    void on_actionExportLogs_triggered();
+
 private:
     Ui::MainWindow *ui;
     void setup3DView(); // Helper function
@@ -82,6 +85,9 @@ private:
     // Dark Mode
     bool m_darkMode = true;
     QAction *m_actionToggleTheme = nullptr;
+
+    // This string will hold all your log messages
+    QString m_logBuffer;
 };
 
 #endif // MAINWINDOW_H

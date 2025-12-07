@@ -87,6 +87,15 @@ MainWindow::MainWindow(QWidget *parent)
         ui->menu_Widok->addSeparator();
         ui->menu_Widok->addAction(m_actionToggleTheme);
     }
+
+    // 1. Create the "Export Logs" action
+    QAction *exportAction = new QAction("Ekportuj Logi", this);
+
+    // 2. Add action to menu
+    ui->menuPlik->addAction(exportAction);
+
+    // 3. Connect the action to the slot
+    connect(exportAction, &QAction::triggered, this, &MainWindow::on_actionExportLogs_triggered);
 }
 
 MainWindow::~MainWindow()
@@ -319,4 +328,38 @@ void MainWindow::on_pushButton_clicked()
         ui->view3DWidget->setFocus();
         QMetaObject::invokeMethod(rootObject, "loadModel", Q_ARG(QVariant, fileUrl.toString()));
     }
+}
+
+void MainWindow::on_actionExportLogs_triggered()
+{
+    m_logBuffer = ui->textEdit->toPlainText();
+
+    if (m_logBuffer.isEmpty()) {
+        QMessageBox::information(this, "Eksport logów", "Brak logów do zapisania.");
+        return;
+    }
+
+    // 1. Get the directory where the application executable is running
+    QString appDir = QCoreApplication::applicationDirPath();
+
+    // 2. Construct the full file path safely
+    // This creates: ".../YourBuildFolder/debug/application_log.txt"
+    QString filePath = QDir(appDir).filePath("app_log.txt");
+
+    // 3. Open the file for writing (Overwrites existing file)
+    QFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        QMessageBox::warning(this, "Error", "Brak możliwości zapisu do:\n" + filePath);
+        return;
+    }
+
+    // 4. Write the buffer
+    QTextStream out(&file);
+    out << m_logBuffer;
+
+    file.close();
+
+    // 5. Give feedback so you know it happened
+    // You can remove this line if you want it to be silent
+    QMessageBox::information(this, "Sukces", "Logi wyeksportowane do:\n" + filePath);
 }
