@@ -34,7 +34,6 @@ int main(int argc, char *argv[])
         std::cout << " - " << path.toStdString() << std::endl;
     }
 
-    MainWindow *mainWindow = new MainWindow();
     mainWindow->setWindowTitle("ImageTo3D Konwerter");
     mainWindow->show();
     // --- DIAGNOSTYKA IMPORTERÓW ---
