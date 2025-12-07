@@ -7,6 +7,7 @@
 #include <QDir>
 #include <QThread>
 #include <QQuickWidget>
+#include <QSet>
 
 // --- INCLUDE NASZYCH SILNIKÓW ---
 #include "reconstructionmanager.h"
@@ -88,6 +89,9 @@ private:
 
     // This string will hold all your log messages
     QString m_logBuffer;
+
+    // This variable will store your unique list of images
+    QSet<QString> m_selectedImages; // <--- ADD THIS
 };
 
 #endif // MAINWINDOW_H

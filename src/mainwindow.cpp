@@ -193,6 +193,25 @@ void MainWindow::on_treeView_clicked(const QModelIndex &index)
         m_pixmapItem->setPixmap(pixmap);
         ui->graphicsView_3->fitInView(m_pixmapItem, Qt::KeepAspectRatio);
     }
+
+    // Toggle Logic: Add or Remove
+    if (m_selectedImages.contains(filePath)) {
+        // IMAGE IS ALREADY IN LIST -> REMOVE IT
+        m_selectedImages.remove(filePath);
+        qDebug() << "Removed image:" << filePath;
+
+        // Optional: Add visual feedback here (e.g., change row color back to normal)
+    }
+    else {
+        // IMAGE IS NEW -> ADD IT
+        m_selectedImages.insert(filePath);
+        qDebug() << "Added image:" << filePath;
+
+        // Optional: Add visual feedback here (e.g., highlight the row)
+    }
+
+    // Debug: Print current count
+    qDebug() << "Total unique images selected:" << m_selectedImages.size();
 }
 
 void MainWindow::on_pushButton_2_clicked()
