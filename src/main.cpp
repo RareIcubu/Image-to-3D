@@ -1,6 +1,9 @@
 #include <QApplication>
 #include <iostream>
 #include "mainwindow.h"
+#include "Theme.h"
+
+// Dołączamy nasz plik konfiguracyjny z wersją
 #include "config.h"
 
 int main(int argc, char *argv[])
@@ -19,6 +22,11 @@ int main(int argc, char *argv[])
 
     // 3. Dublujemy to w instancji aplikacji dla pewności
     app.addLibraryPath("/usr/lib/x86_64-linux-gnu/qt6/plugins");
+    // Dark Mode
+    Theme::applyDarkPalette(app);
+
+    // Stworzenie głównego okna
+    MainWindow *mainWindow = new MainWindow();
 
     // Diagnostyka: Wypiszmy, gdzie szukamy
     std::cout << "Szukam pluginów w:" << std::endl;

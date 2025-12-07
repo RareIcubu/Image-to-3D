@@ -49,6 +49,9 @@ add_executable(ImageTo3D
     ai_reconstructionmanager.cpp
     ai_reconstructionmanager.h
     viewer.qml
+    Theme.cpp
+    Theme.h
+    
     # --- WAŻNE: Dodajemy pliki konfiguracyjne do targetu ---
     # Dzięki temu CMake "wie", że projekt zależy od nich.
     # Jeśli zmienisz numer w version.txt, CMake automatycznie przebuduje config.h!

@@ -57,6 +57,9 @@ private slots:
     // Wybranie i odpalenie podgladu modelu 3d z pliku .obj
     void on_pushButton_clicked();
 
+    // Dark Mode
+    void toggleTheme();
+
 private:
     Ui::MainWindow *ui;
     void setup3DView(); // Helper function
@@ -75,6 +78,10 @@ private:
     // Grafika 2D
     QGraphicsScene *m_scene;
     QGraphicsPixmapItem *m_pixmapItem;
+
+    // Dark Mode
+    bool m_darkMode = true;
+    QAction *m_actionToggleTheme = nullptr;
 };
 
 #endif // MAINWINDOW_H
