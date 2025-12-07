@@ -3,11 +3,15 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick3D
 import QtQuick3D.Helpers
-import QtQuick3D.AssetUtils 
+import QtQuick3D.AssetUtils
 
 Item {
     id: root
     anchors.fill: parent
+
+    // --- LOGIKA NAPRAWY MODELI ---
+    // False = Kostka (Normalny), True = AI (Odwrócony)
+    property bool fixBackFace: false 
 
     // --- LEWY HUD: INFO ---
     Rectangle {
@@ -15,7 +19,7 @@ Item {
         z: 1000
         color: "#AA000000"
         width: 320
-        height: 240
+        height: 280 // Zwiększyłem wysokość, żeby zmieścić CheckBox
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.margins: 10
@@ -29,10 +33,10 @@ Item {
             spacing: 5
             Text { text: "INFO & KAMERA"; color: "cyan"; font.bold: true }
             Rectangle { Layout.fillWidth: true; height: 1; color: "#555" }
-            
+
             Text { text: "Wymiary Oryginału: " + modelDimsString; color: "yellow"; font.pixelSize: 11 }
             Text { text: "Auto-Mnożnik: x" + transformNode.autoScaleFactor.toFixed(2); color: "orange"; font.pixelSize: 11 }
-            
+
             Button {
                 text: "CENTRUUJ I NORMALIZUJ"
                 Layout.fillWidth: true
@@ -44,6 +48,24 @@ Item {
                 }
             }
             
+            // --- NOWOŚĆ: Przełącznik dla modeli AI ---
+            CheckBox {
+                id: aiModeCheck
+                text: "Tryb 2D/AI (Napraw tył)"
+                checked: root.fixBackFace
+                onCheckedChanged: {
+                    root.fixBackFace = checked;
+                    view.forceActiveFocus();
+                }
+                contentItem: Text {
+                    text: parent.text
+                    color: "lightgreen" // Wyróżniający się kolor
+                    font.bold: true
+                    leftPadding: parent.indicator.width + parent.spacing
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+
             Text { text: "WASD = Latanie | Shift = Szybko"; color: "gray"; font.pixelSize: 10 }
             Text { text: "LPM + Mysz = Rozglądanie"; color: "gray"; font.pixelSize: 10 }
         }
@@ -51,7 +73,7 @@ Item {
 
     property string modelDimsString: "-"
 
-    // --- PRAWY HUD: TRANSFORMACJE ---
+    // --- PRAWY HUD: TRANSFORMACJE (Bez zmian, tylko formatowanie) ---
     Rectangle {
         id: transformPanel
         z: 1000
@@ -75,10 +97,8 @@ Item {
                 spacing: 8
 
                 Text { text: "EDYCJA (Względem Auto-Skali)"; color: "#00AAFF"; font.bold: true; Layout.alignment: Qt.AlignHCenter }
-                
-                // --- SKALA RELATYWNA ---
+
                 Rectangle { Layout.fillWidth: true; height: 1; color: "#555" }
-                // Teraz suwak mnoży wynik auto-skalowania. 1.0 = Idealny rozmiar.
                 Text { text: "ZOOM OBIEKTU: " + scaleSlider.value.toFixed(2) + "x"; color: "white"; font.bold: true }
                 Slider {
                     id: scaleSlider
@@ -86,30 +106,21 @@ Item {
                     from: 0.1; to: 10.0; value: 1.0 
                 }
 
-                // --- POZYCJA ---
                 Rectangle { Layout.fillWidth: true; height: 1; color: "#555" }
                 Text { text: "PRZESUWANIE"; color: "orange" }
-                
-                // Zwiększyłem zakresy suwaków pozycji
                 Text { text: "X: " + posX.value.toFixed(0); color: "gray"; font.pixelSize: 10 }
-                Slider { id: posX; Layout.fillWidth: true; from: -1000; to: 1000; value: 0 }
-                
+                Slider { id: posX; Layout.fillWidth: true; from: -10000; to: 10000; value: 0 }
                 Text { text: "Y: " + posY.value.toFixed(0); color: "gray"; font.pixelSize: 10 }
-                Slider { id: posY; Layout.fillWidth: true; from: -1000; to: 1000; value: 0 }
-                
+                Slider { id: posY; Layout.fillWidth: true; from: -10000; to: 10000; value: 0 }
                 Text { text: "Z: " + posZ.value.toFixed(0); color: "gray"; font.pixelSize: 10 }
-                Slider { id: posZ; Layout.fillWidth: true; from: -1000; to: 1000; value: 0 }
+                Slider { id: posZ; Layout.fillWidth: true; from: -10000; to: 10000; value: 0 }
 
-                // --- ROTACJA ---
                 Rectangle { Layout.fillWidth: true; height: 1; color: "#555" }
                 Text { text: "OBRACANIE"; color: "lightgreen" }
-                
                 Text { text: "X: " + rotX.value.toFixed(0) + "°"; color: "red"; font.pixelSize: 10 }
                 Slider { id: rotX; Layout.fillWidth: true; from: 0; to: 360; value: 0 }
-                
                 Text { text: "Y: " + rotY.value.toFixed(0) + "°"; color: "green"; font.pixelSize: 10 }
                 Slider { id: rotY; Layout.fillWidth: true; from: 0; to: 360; value: 0 }
-                
                 Text { text: "Z: " + rotZ.value.toFixed(0) + "°"; color: "blue"; font.pixelSize: 10 }
                 Slider { id: rotZ; Layout.fillWidth: true; from: 0; to: 360; value: 0 }
 
@@ -151,22 +162,21 @@ Item {
         DirectionalLight { eulerRotation.x: 45; eulerRotation.y: 45; brightness: 1.2; color: "#FFDEAD" }
         PointLight { position: camera.position; brightness: 2.0; color: "white" }
 
-        AxisHelper { enableXZGrid: true; gridColor: "#555"; scale: Qt.vector3d(200, 200, 200) }
+        AxisHelper { enableXZGrid: true; gridColor: "#555"} 
 
         // --- KONTENER TRANSFORMACJI ---
         Node {
             id: transformNode
             
-            // To jest ten magiczny czynnik. Obliczamy go raz przy ładowaniu.
             property real autoScaleFactor: 1.0
 
-            // Wzór na ostateczną skalę: AUTO_SKALA * SUWAK_UŻYTKOWNIKA
-            // Dzięki temu suwak zawsze działa w "ludzkim" zakresie (0.1 - 10),
-            // a autoScaleFactor odwala brudną robotę (np. x5000 albo x0.001)
+            // --- TU JEST MAGIA ---
+            // Jeśli fixBackFace (CheckBox) jest TRUE -> mnożymy Z przez -1.
+            // Jeśli FALSE (Kostka) -> mnożymy przez 1.
             scale: Qt.vector3d(
                 autoScaleFactor * scaleSlider.value, 
                 autoScaleFactor * scaleSlider.value, 
-                autoScaleFactor * scaleSlider.value
+                autoScaleFactor * scaleSlider.value * (root.fixBackFace ? -1 : 1)
             )
             
             position: Qt.vector3d(posX.value, posY.value, posZ.value)
@@ -176,6 +186,8 @@ Item {
                 id: loader
                 source: ""
                 instancing: null
+                
+                // USUNĄŁEM hardcodowane scale (-1). Teraz steruje tym nadrzędny Node.
                 
                 onStatusChanged: {
                     if (status === RuntimeLoader.Ready) {
@@ -187,7 +199,7 @@ Item {
 
         WasdController {
             controlledObject: camera
-            speed: 5.0; shiftSpeed: 100.0 // Szybszy shift dla wygody
+            speed: 5.0; shiftSpeed: 100.0
             keysEnabled: true; mouseEnabled: true
         }
     }
@@ -200,31 +212,25 @@ Item {
         var sizeVec = bMax.minus(bMin);
         var maxDim = Math.max(sizeVec.x, Math.max(sizeVec.y, sizeVec.z));
 
-        // Wyświetlanie wymiarów oryginału
         modelDimsString = sizeVec.x.toFixed(5) + " x " + sizeVec.y.toFixed(5);
 
-        if (maxDim <= 0.000001) return; // Zabezpieczenie przed dzieleniem przez 0
+        if (maxDim <= 0.000001) return; 
 
-        // 1. Centrowanie wewnętrzne (loader przesuwa się wewnątrz transformNode)
+        // 1. Centrowanie
         var center = bMin.plus(bMax).times(0.5);
         loader.position = center.times(-1);
 
-        // 2. OBLICZANIE MNOŻNIKA NORMALIZACJI
-        // Chcemy, żeby model ZAWSZE miał rozmiar docelowy = 100 jednostek.
-        var targetSize = 100.0;
-        
-        // Ustawiamy właściwość Node'a, a nie suwak!
+        // 2. Normalizacja do 1000 jednostek
+        var targetSize = 1000.0;
         transformNode.autoScaleFactor = targetSize / maxDim;
 
-        // 3. Reset suwaka użytkownika do 1.0 (czyli "100% znormalizowanego rozmiaru")
+        // 3. Reset UI
         blockUpdates = true;
         scaleSlider.value = 1.0;
         
         // 4. Ustawienie na podłodze
-        // Model ma teraz wysokość = sizeVec.y * autoScaleFactor
         var normalizedHeight = sizeVec.y * transformNode.autoScaleFactor;
         posY.value = normalizedHeight / 2.0;
-        
         posX.value = 0; posZ.value = 0;
         rotX.value = 0; rotY.value = 0; rotZ.value = 0;
         blockUpdates = false;
@@ -232,8 +238,6 @@ Item {
         // 5. Kamera
         camera.position = Qt.vector3d(0, normalizedHeight, 250);
         camera.lookAt(Qt.vector3d(0, normalizedHeight/2.0, 0));
-        
-        console.log("AutoFit wykonany. MaxDim oryginału:", maxDim, "AutoMnożnik:", transformNode.autoScaleFactor);
     }
 
     function loadModel(path) {

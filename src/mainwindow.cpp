@@ -28,8 +28,8 @@ MainWindow::MainWindow(QWidget *parent)
     , m_pixmapItem(new QGraphicsPixmapItem())
 {
     ui->setupUi(this);
-    
-    // To jest funkcja, której brakowało:
+
+    // Konfiguracja widoku 3D
     setup3DView();
 
     if (ui->menu_Widok) {
@@ -89,19 +89,18 @@ void MainWindow::setup3DView()
 {
     QQuickWidget *view = ui->view3DWidget;
     QQmlEngine *engine = view->engine();
-    
-    // Ważne dla Dockera/Linuxa - ścieżka do modułów QML
+
+    // Importy dla środowiska Linux/Docker
     engine->addImportPath("/usr/lib/x86_64-linux-gnu/qt6/qml");
 
     view->setResizeMode(QQuickWidget::SizeRootObjectToView);
     view->setSource(QUrl::fromLocalFile("viewer.qml"));
 
-    // --- KLUCZOWE DLA DZIAŁANIA KLAWIATURY (WASD) ---
+    // --- Obsługa klawiatury (WASD) ---
     view->setFocusPolicy(Qt::StrongFocus);
     view->setAttribute(Qt::WA_Hover);
     view->setFocus();
-    // ------------------------------------------------
-
+    
     if (view->status() == QQuickWidget::Error) {
         for (const auto &error : view->errors()) qDebug() << error.toString();
     }
@@ -168,7 +167,7 @@ void MainWindow::on_pushButton_2_clicked()
     ui->pushButton_2->setEnabled(false);
     ui->textEdit->clear();
     appendLog("--- START PROCESU ---");
-    ui->progressBar->setRange(0, 0); 
+    ui->progressBar->setRange(0, 0);
     ui->progressBar->show();
 
     QString selection = ui->comboBox_4->currentData().toString();
@@ -199,7 +198,7 @@ void MainWindow::onReconstructionFinished(QString modelPath)
     ui->pushButton_2->setEnabled(true);
     appendLog("--- SUKCES ---");
     QMessageBox::information(this, "Gotowe", "Model 3D został utworzony:\n" + modelPath);
-    
+
     // Automatyczne ładowanie wyniku
     QUrl fileUrl = QUrl::fromLocalFile(modelPath);
     QQuickItem *rootObject = ui->view3DWidget->rootObject();
@@ -234,7 +233,7 @@ void MainWindow::refreshModelList()
     }
 }
 
-// --- FUNKCJA ŁADOWANIA MODELU Z KONWERSJĄ ---
+// --- ŁADOWANIE MODELU Z KONWERSJĄ ASSIMP ---
 void MainWindow::on_pushButton_clicked()
 {
     QString fileName = QFileDialog::getOpenFileName(this,
@@ -248,20 +247,21 @@ void MainWindow::on_pushButton_clicked()
     QFileInfo fi(fileName);
     QString ext = fi.suffix().toLower();
 
-    // Jeśli format nie jest natywny dla Qt Quick 3D (GLB/GLTF), konwertujemy
+    // Konwersja na GLB dla Qt Quick 3D
     if (ext != "glb" && ext != "gltf") {
         appendLog("Konwersja modelu " + ext + " do GLB...");
-        
+
         QString outputDir = QDir::tempPath() + "/qt_model_conversion";
         QDir().mkpath(outputDir);
-        
-        // UNIKALNA NAZWA (Timestamp) - Naprawia problem z cache
+
+        // Timestamp dla unikalności (cache busting)
         QString timestamp = QString::number(QDateTime::currentMSecsSinceEpoch());
         QString outputFile = outputDir + "/model_" + timestamp + ".glb";
 
         QProcess converter;
+        // Assimp musi być w PATH
         converter.start("assimp", QStringList() << "export" << fileName << outputFile);
-        
+
         if (!converter.waitForFinished(30000)) {
             appendLog("Błąd: Timeout konwersji assimp.");
             return;
@@ -281,8 +281,7 @@ void MainWindow::on_pushButton_clicked()
     QQuickItem *rootObject = ui->view3DWidget->rootObject();
 
     if (rootObject) {
-        // Przywróć focus do widgetu, żeby WASD/Suwaki działały po kliknięciu przycisku
-        ui->view3DWidget->setFocus(); 
+        ui->view3DWidget->setFocus();
         QMetaObject::invokeMethod(rootObject, "loadModel", Q_ARG(QVariant, fileUrl.toString()));
     }
 }
