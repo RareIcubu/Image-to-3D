@@ -1,0 +1,56 @@
+services:
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile.nvidia
+      target: base
+      args:
+        USER_ID: ${UID:-1000}
+        GROUP_ID: ${GID:-1000}
+
+    # Zezwolenia dla Nvidii
+    privileged: true
+    ipc: host
+    network_mode: host
+
+    environment:
+      - DISPLAY=${DISPLAY}
+      - NVIDIA_DOCKER_FIX=1 
+      # --- FIX GRAFIKI QT (Czarny ekran) ---
+      # Używamy XCB (XWayland) zamiast natywnego Waylanda, bo jest stabilniejszy dla QtQuick3D + Nvidia
+      - QT_QPA_PLATFORM=xcb
+      
+      # KLUCZOWE: Wymusza integrację przez GLX zamiast EGL. 
+      # Nvidia + Docker + XWayland często daje czarny ekran na EGL.
+      - QT_XCB_GL_INTEGRATION=xcb_glx
+      
+      # Wymuszenie backendu OpenGL dla QtQuick3D
+      - QSG_RHI_BACKEND=opengl
+      
+      # --- FIX WYDAJNOŚCI / CRASHY ---
+      # Wyłącza wielowątkowość renderera (zwiększa stabilność na Nvidii)
+      - QSG_RENDER_LOOP=basic
+      
+      # --- STEROWNIKI NVIDIA ---
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics,display
+      
+      # Pomaga COLMAPowi znaleźć biblioteki w kontenerze
+      - LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64
+
+    # Rezerwacja GPU
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+    volumes:
+      - .:/app
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - /dev/dri:/dev/dri
+      - /run/user/1000:/run/user/1000:rw 
+      # Opcjonalnie: cache modeli, żeby nie pobierać ciągle
+      - ~/.cache/huggingface:/home/devuser/.cache/huggingface

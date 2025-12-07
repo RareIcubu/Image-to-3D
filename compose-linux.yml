@@ -1,16 +1,15 @@
 services:
   dev:
+    ipc: host
+    network_mode: host
     environment:
       - DISPLAY=${DISPLAY}
+      - QT_QPA_PLATFORM=wayland # Lub xcb, co tam wolisz na AMD
+      - XDG_RUNTIME_DIR=/run/user/1000
+      - WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-1}
       
-      # --- ZDEJMUJEMY BLOKADY ---
-      # - QT_XCB_GL_INTEGRATION=none  <-- Zakomentuj lub usuń
-      # - LIBGL_ALWAYS_SOFTWARE=1     <-- Zakomentuj lub usuń (To blokowało COLMAP!)
-
-      # --- KONFIGURACJA NVIDIA ---
-      # 'all' udostępnia: compute, utility, graphics (OpenGL), display
-    devices:
-      - /dev/dri:/dev/dri
     volumes:
+      - .:/app
+      - /run/user/1000:/run/user/1000:rw
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-
+      - /dev/dri:/dev/dri

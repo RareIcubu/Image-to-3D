@@ -3,6 +3,7 @@
 #include <QCoreApplication>
 #include <QFile>
 #include <QRegularExpression>
+#include <cstdlib>
 
 ReconstructionManager::ReconstructionManager(QObject *parent) : QObject(parent) {
     m_process = nullptr;
@@ -52,6 +53,17 @@ void ReconstructionManager::runNextStep() {
         return "--" + key + "=" + val;
     };
 
+    // --- DETEKCJA ŚRODOWISKA NVIDIA (FIX) ---
+    bool useNvidiaFix = false;
+    const char* envVar = std::getenv("NVIDIA_DOCKER_FIX");
+    if (envVar && QString(envVar) == "1") {
+        useNvidiaFix = true;
+        qDebug() << "[INFO] Wykryto tryb Nvidia Docker Fix: Wymuszam CPU dla SIFT i limit pamięci.";
+    } else {
+        qDebug() << "[INFO] Tryb standardowy: Pełne GPU.";
+    }
+    // ----------------------------------------
+
     // --- KONFIGURACJA KROKÓW ---
     switch (m_currentStep) {
     case 0: // FEATURE EXTRACTION
@@ -59,13 +71,28 @@ void ReconstructionManager::runNextStep() {
         colmapArgs << "feature_extractor"
                    << arg("database_path", m_workspacePath + "/database.db")
                    << arg("image_path", m_imagesPath);
-                   // Usunięto flagi use_gpu/num_threads (zgodnie z życzeniem)
+
+        if (useNvidiaFix) {
+            // FIX DLA NVIDIA: CPU + Mniejsze zdjęcia (Brak Crashy, Brak OOM)
+            colmapArgs << "--SiftExtraction.use_gpu=0";
+            colmapArgs << "--SiftExtraction.max_image_size=1600"; 
+        } else {
+            // STANDARD (AMD/WINDOWS): Pełne GPU, pełna jakość
+            colmapArgs << "--SiftExtraction.use_gpu=1";
+            // Domyślny rozmiar (3200) lub brak limitu
+        }
         break;
 
     case 1: // FEATURE MATCHING
         emit progressUpdated("Matching Features...\n", 25);
         colmapArgs << "exhaustive_matcher"
                    << arg("database_path", m_workspacePath + "/database.db");
+
+        if (useNvidiaFix) {
+            colmapArgs << "--SiftMatching.use_gpu=0"; // CPU dla stabilności
+        } else {
+            colmapArgs << "--SiftMatching.use_gpu=1"; // GPU dla szybkości
+        }
         break;
 
     case 2: // SPARSE RECONSTRUCTION
@@ -97,12 +124,11 @@ void ReconstructionManager::runNextStep() {
         }
         break;
 
-    case 4: // DENSE STEREO
+    case 4: // DENSE STEREO (To zawsze działa na GPU przez CUDA!)
         emit progressUpdated("Calculating Depth Maps...\n", 70);
         colmapArgs << "patch_match_stereo"
                    << arg("workspace_path", m_workspacePath + "/dense")
                    << arg("workspace_format", "COLMAP")
-                   // Domyślne ustawienia COLMAP (bez wymuszania GPU/CPU)
                    << arg("PatchMatchStereo.geom_consistency", "true");
         break;
 
@@ -135,11 +161,10 @@ void ReconstructionManager::runNextStep() {
     m_process = new QProcess(this);
     m_process->setProcessChannelMode(QProcess::MergedChannels);
 
-    // --- WRAPPER SCRIPT (Naprawa Logów) ---
+    // --- WRAPPER SCRIPT (Dla logów COLMAP) ---
     QString fullCommand = colmapBinary + " " + colmapArgs.join(" ");
     QString program = "/usr/bin/script";
     QStringList scriptArgs;
-    // -q: Quiet, -e: Return exit code, -c: Command, /dev/null: Output sink
     scriptArgs << "-q" << "-e" << "-c" << fullCommand << "/dev/null";
 
     connect(m_process, &QProcess::readyReadStandardOutput, [this]() {
@@ -147,16 +172,14 @@ void ReconstructionManager::runNextStep() {
             QByteArray data = m_process->readLine();
             QString line = QString::fromLocal8Bit(data).trimmed();
             
-            // Parsowanie postępu
+            // (Tutaj Twój kod parsowania paska postępu - bez zmian)
             static QRegularExpression reProgress("\\[(\\d+)/(\\d+)\\]");
             QRegularExpressionMatch match = reProgress.match(line);
             int pct = -1;
-
             if (match.hasMatch()) {
                 int cur = match.captured(1).toInt();
                 int tot = match.captured(2).toInt();
                 if (tot > 0) {
-                    // Proste skalowanie paska
                     int base = 0; int range = 0;
                     if (m_currentStep == 0) { base = 0; range = 15; }
                     else if (m_currentStep == 1) { base = 15; range = 15; }
@@ -165,7 +188,6 @@ void ReconstructionManager::runNextStep() {
                     else if (m_currentStep == 4) { base = 60; range = 25; }
                     else if (m_currentStep == 5) { base = 85; range = 10; }
                     else if (m_currentStep == 6) { base = 95; range = 5; }
-                    
                     if (range > 0) pct = base + (int)((float)cur/tot * range);
                 }
             }
