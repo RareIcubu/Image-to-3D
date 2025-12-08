@@ -57,6 +57,11 @@ private slots:
     // Wybranie i odpalenie podgladu modelu 3d z pliku .obj
     void on_pushButton_clicked();
 
+    void onStartOrCancelClicked();
+    void onActualCancel();
+
+    bool m_isRunning = false;
+
     // Dark Mode
     void toggleTheme();
 
@@ -81,7 +86,9 @@ private:
 
     // Dark Mode
     bool m_darkMode = true;
+
     QAction *m_actionToggleTheme = nullptr;
+    bool m_isRunning = false;
 };
 
 #endif // MAINWINDOW_H
