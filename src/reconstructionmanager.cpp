@@ -4,14 +4,48 @@
 #include <QFile>
 #include <QRegularExpression>
 #include <cstdlib>
+#include <QThread>
 
 ReconstructionManager::ReconstructionManager(QObject *parent) : QObject(parent) {
     m_process = nullptr;
     m_fallbackToCpu = false;
     m_useFastMode = true;
+    m_abort.store(false);
+}
+
+ReconstructionManager::~ReconstructionManager()
+{
+    stop();
+
+    if (m_process && m_process->state() == QProcess::Running) {
+        m_process->terminate();
+        m_process->waitForFinished(1000);
+        if (m_process->state() == QProcess::Running) {
+            m_process->kill();
+            m_process->waitForFinished(500);
+        }
+    }
+}
+
+void ReconstructionManager::stop()
+{
+    m_abort.store(true);
+
+    if (m_process) {
+        if (m_process->state() == QProcess::Running) {
+            m_process->terminate();
+            if (!m_process->waitForFinished(1000)) {
+                m_process->kill();
+                m_process->waitForFinished(500);
+            }
+        }
+    }
 }
 
 void ReconstructionManager::startReconstruction(const QString &imagesPath, const QString &outputDir) {
+
+    m_abort.store(false);
+
     m_imagesPath = imagesPath;
     m_workspacePath = outputDir;
     m_currentStep = 0;
@@ -40,10 +74,24 @@ void ReconstructionManager::startReconstruction(const QString &imagesPath, const
     }
 
     qDebug() << "Starting reconstruction in:" << m_workspacePath;
+
+    // Zatrzymywanie
+    if (m_abort.load()) {
+        emit errorOccurred("Zatrzymano przez użytkownika");
+        return;
+    }
+
     runNextStep();
 }
 
 void ReconstructionManager::runNextStep() {
+
+    // Zatrzymanie
+    if (m_abort.load()) {
+        emit errorOccurred("Proces anulowany przez użytkownika");
+        return;
+    }
+
     m_stepTimer.restart();
 
     QString colmapBinary = "/usr/bin/colmap";
@@ -157,7 +205,20 @@ void ReconstructionManager::runNextStep() {
         return;
     }
 
-    if (m_process) m_process->deleteLater();
+    // Czyszczenie procesów
+    if (m_process) {
+        if (m_process->state() == QProcess::Running) {
+            m_process->terminate();
+            if (!m_process->waitForFinished(1000)) {
+                m_process->kill();
+                m_process->waitForFinished(500);
+            }
+        }
+        m_process->deleteLater();
+        m_process = nullptr;
+    }
+
+    //if (m_process) m_process->deleteLater(); if powyżej ma to robić
     m_process = new QProcess(this);
     m_process->setProcessChannelMode(QProcess::MergedChannels);
 
@@ -167,10 +228,16 @@ void ReconstructionManager::runNextStep() {
     QStringList scriptArgs;
     scriptArgs << "-q" << "-e" << "-c" << fullCommand << "/dev/null";
 
-    connect(m_process, &QProcess::readyReadStandardOutput, [this]() {
+    connect(m_process, &QProcess::readyReadStandardOutput, this, [this]() {
+        if (!m_process) return;
         while (m_process->canReadLine()) {
             QByteArray data = m_process->readLine();
             QString line = QString::fromLocal8Bit(data).trimmed();
+
+            if (m_abort.load()) {
+                // ignore further output
+                continue;
+            }
             
             // (Tutaj Twój kod parsowania paska postępu - bez zmian)
             static QRegularExpression reProgress("\\[(\\d+)/(\\d+)\\]");
@@ -196,13 +263,28 @@ void ReconstructionManager::runNextStep() {
     });
 
     connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-            [=](int exitCode, QProcess::ExitStatus status) {
+            this, [this](int exitCode, QProcess::ExitStatus status) {
+        // If abort was requested while process was running, don't continue pipeline
+        if (m_abort.load()) {
+            // Ensure process is terminated
+            if (m_process && m_process->state() == QProcess::Running) {
+                m_process->terminate();
+                if (!m_process->waitForFinished(1000)) {
+                    m_process->kill();
+                    m_process->waitForFinished(500);
+                }
+            }
+            emit errorOccurred("Zatrzymo przez użytkownika");
+            return;
+        }
         if (exitCode == 0) {
             if (m_currentStep == 99) m_currentStep = 100;
             else m_currentStep++;
+            QThread::msleep(50); // Unikanie odpalania procesu zanim poprzedni się zatrzyma
             runNextStep();
         } else {
             QString err = m_process->readAllStandardOutput();
+            if (m_process) err = m_process->readAllStandardOutput();
             emit errorOccurred("Step failed code " + QString::number(exitCode) + "\n" + err);
         }
     });

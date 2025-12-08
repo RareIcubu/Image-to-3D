@@ -1,15 +1,20 @@
 #include "mainwindow.h"
-#include "Theme.h"
-#include <QAction>
-#include "ui_mainwindow.h"
-#include "config.h"
 
+#include "ui_mainwindow.h"
+
+// Dołącz potrzebne klasy
 #include <QFileDialog>
 #include <QFileSystemModel>
-#include <QMessageBox>
+#include <QStringList>
 #include <QGraphicsScene>
 #include <QGraphicsPixmapItem>
+#include <QPixmap>
 #include <QWheelEvent>
+<<<<<<< Updated upstream
+#include <QMessageBox>
+
+#include "config.h"
+=======
 #include <QDateTime>
 #include <QDebug>
 #include <QQmlContext>
@@ -17,189 +22,202 @@
 #include <QQuickItem>
 #include <QProcess>
 #include <QDirIterator>
+#include <QMetaObject>
+>>>>>>> Stashed changes
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
-    , m_dirModel(new QFileSystemModel(this))
-    , m_manager(new ReconstructionManager())
-    , m_workerThread(new QThread(this))
-    , m_aiManager(new AIReconstructionManager())
-    , m_aiThread(new QThread(this))
+    , m_dirModel(new QFileSystemModel(this)) // Zainicjuj JEDEN model
     , m_scene(new QGraphicsScene(this))
     , m_pixmapItem(new QGraphicsPixmapItem())
 {
     ui->setupUi(this);
 
-    // Konfiguracja widoku 3D
-    setup3DView();
+    ui->menu_Widok->addAction(ui->inputDockWidget->toggleViewAction());
+    ui->menu_Widok->addAction(ui->logDockWidget->toggleViewAction());
 
-    if (ui->menu_Widok) {
-        ui->menu_Widok->addAction(ui->inputDockWidget->toggleViewAction());
-        ui->menu_Widok->addAction(ui->logDockWidget->toggleViewAction());
-    }
+    // --- Ustawienia modelu ---
 
+    // 1. Ustaw filtr QDir (co ma wczytywać z dysku)
     m_dirModel->setFilter(QDir::NoDotAndDotDot | QDir::AllDirs | QDir::Files);
+
+    // 2. Ustaw filtr nazw (ignoruje wielkość liter)
     m_dirModel->setNameFilters(QStringList() << "*.jpg" << "*.jpeg" << "*.png");
+
+    // 3. TO JEST KLUCZ:
+    // Mówi modelowi, aby UKRYWAŁ pliki, a nie je "wyszarzał".
     m_dirModel->setNameFilterDisables(false);
-    ui->treeView->setModel(m_dirModel);
-    for (int i = 1; i < 4; ++i) ui->treeView->hideColumn(i);
+
+    // --- Ustawienia widoku ---
+    ui->treeView->setModel(m_dirModel); // Podłącz model do widoku
+
+    // Ukryj niepotrzebne kolumny
+    ui->treeView->hideColumn(1); // Rozmiar
+    ui->treeView->hideColumn(2); // Typ
+    ui->treeView->hideColumn(3); // Data
+
+    ui->progressBar->hide();
+    ui->progressBar->setRange(0, 0); // Ustaw na "spinner"
+
+    // 4. TO JEST DRUGI KLUCZ:
+    // Ustaw ścieżkę startową na folder, w którym JEST KOD (/app),
+    // a nie na pusty folder domowy (/home/devuser).
     ui->treeView->setRootIndex(m_dirModel->setRootPath("/app"));
 
-    connect(m_dirModel, &QFileSystemModel::directoryLoaded, this, &MainWindow::onModelLoaded);
 
     m_scene->addItem(m_pixmapItem);
+
+    // 2. Powiedz 'graphicsView_3' z .ui, żeby patrzył na naszą scenę
     ui->graphicsView_3->setScene(m_scene);
+
+    // 3. (Opcjonalnie) Ustaw tryb przeciągania myszką
+    //    Teraz możesz przesuwać obrazek wciśniętą rolką lub lewym przyciskiem
     ui->graphicsView_3->setDragMode(QGraphicsView::ScrollHandDrag);
-    ui->graphicsView_3->setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
     ui->graphicsView_3->setResizeAnchor(QGraphicsView::AnchorUnderMouse);
-    ui->graphicsView_3->setRenderHint(QPainter::Antialiasing);
     ui->graphicsView_3->installEventFilter(this);
 
-    refreshModelList();
+    // 4. (Opcjonalnie) Dodaj lepsze renderowanie
+    ui->graphicsView_3->setRenderHint(QPainter::Antialiasing);
+    ui->graphicsView_3->setRenderHint(QPainter::SmoothPixmapTransform);
 
-    ui->textEdit->setReadOnly(true);
-    appendLog("--- Gotowy do pracy ---");
 
-    m_manager->moveToThread(m_workerThread);
-    connect(this, &MainWindow::requestReconstruction, m_manager, &ReconstructionManager::startReconstruction);
-    connect(m_manager, &ReconstructionManager::progressUpdated, this, &MainWindow::onProgressUpdated);
-    connect(m_manager, &ReconstructionManager::finished, this, &MainWindow::onReconstructionFinished);
-    connect(m_manager, &ReconstructionManager::errorOccurred, this, &MainWindow::onErrorOccurred);
-    connect(m_workerThread, &QThread::finished, m_manager, &QObject::deleteLater);
-    m_workerThread->start();
+    // Połącz sygnał ładowania z naszym slotem
+    connect(m_dirModel, &QFileSystemModel::directoryLoaded,
+            this, &MainWindow::onModelLoaded);
 
-    m_aiManager->moveToThread(m_aiThread);
-    connect(this, &MainWindow::requestAiReconstruction, m_aiManager, &AIReconstructionManager::startAI);
-    connect(m_aiManager, &AIReconstructionManager::progressUpdated, this, &MainWindow::onProgressUpdated);
-    connect(m_aiManager, &AIReconstructionManager::finished, this, &MainWindow::onReconstructionFinished);
-    connect(m_aiManager, &AIReconstructionManager::errorOccurred, this, &MainWindow::onErrorOccurred);
-    connect(m_aiThread, &QThread::finished, m_aiManager, &QObject::deleteLater);
-    m_aiThread->start();
-
-    // === DARK MODE ===
-
-    m_actionToggleTheme = new QAction(tr("Włącz tryb jasny"), this);
-    m_actionToggleTheme->setCheckable(false);
-    connect(m_actionToggleTheme, &QAction::triggered, this, &MainWindow::toggleTheme);
-
-    if (ui->menu_Widok) {
-        ui->menu_Widok->addSeparator();
-        ui->menu_Widok->addAction(m_actionToggleTheme);
-    }
 }
 
 MainWindow::~MainWindow()
 {
-    m_workerThread->quit();
-    m_workerThread->wait();
-    m_aiThread->quit();
-    m_aiThread->wait();
+<<<<<<< Updated upstream
+=======
+    // Ask managers to stop and ensure stop() executes in their threads before proceeding
+    if (m_manager) {
+        QMetaObject::invokeMethod(m_manager, "stop", Qt::BlockingQueuedConnection);
+    }
+    if (m_aiManager) {
+        QMetaObject::invokeMethod(m_aiManager, "stop", Qt::BlockingQueuedConnection);
+    }
+
+    // Quit and join threads
+    if (m_workerThread) {
+        m_workerThread->quit();
+        m_workerThread->wait();
+    }
+    if (m_aiThread) {
+        m_aiThread->quit();
+        m_aiThread->wait();
+    }
+
+>>>>>>> Stashed changes
     delete ui;
-}
-
-void MainWindow::setup3DView()
-{
-    QQuickWidget *view = ui->view3DWidget;
-    QQmlEngine *engine = view->engine();
-
-    // Importy dla środowiska Linux/Docker
-    engine->addImportPath("/usr/lib/x86_64-linux-gnu/qt6/qml");
-
-    view->setResizeMode(QQuickWidget::SizeRootObjectToView);
-    view->setSource(QUrl::fromLocalFile("viewer.qml"));
-
-    // --- Obsługa klawiatury (WASD) ---
-    view->setFocusPolicy(Qt::StrongFocus);
-    view->setAttribute(Qt::WA_Hover);
-    view->setFocus();
-    
-    if (view->status() == QQuickWidget::Error) {
-        for (const auto &error : view->errors()) qDebug() << error.toString();
-    }
-}
-// --- DARK MODE ---
-
-void MainWindow::toggleTheme()
-{
-    // Toggle flag
-    m_darkMode = !m_darkMode;
-
-    if (m_darkMode) {
-        // switch to dark
-        Theme::applyDarkPalette(*qobject_cast<QApplication*>(QApplication::instance()));
-        if (m_actionToggleTheme) m_actionToggleTheme->setText(tr("Włącz tryb jasny"));
-    } else {
-        // switch to light
-        Theme::applyLightPalette(*qobject_cast<QApplication*>(QApplication::instance()));
-        if (m_actionToggleTheme) m_actionToggleTheme->setText(tr("Włącz tryb ciemny"));
-    }
-
-    // Force UI refresh
-    qApp->processEvents();
-}
-
-// --- FUNKCJE POMOCNICZE ---
-
-void MainWindow::appendLog(const QString &message)
-{
-    QString timestamp = QDateTime::currentDateTime().toString("[HH:mm:ss] ");
-    ui->textEdit->append(timestamp + message);
-    QTextCursor c = ui->textEdit->textCursor();
-    c.movePosition(QTextCursor::End);
-    ui->textEdit->setTextCursor(c);
 }
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
-    if (watched == ui->graphicsView_3 && event->type() == QEvent::Wheel) {
-        QWheelEvent *we = static_cast<QWheelEvent*>(event);
-        double scale = (we->angleDelta().y() > 0) ? 1.15 : (1.0 / 1.15);
-        ui->graphicsView_3->scale(scale, scale);
-        return true;
+    // Sprawdź, czy zdarzenie pochodzi z naszego graphicsView_3
+    if (watched == ui->graphicsView_3)
+    {
+        // Sprawdź, czy zdarzenie to kółko myszy
+        if (event->type() == QEvent::Wheel)
+        {
+            // Rzutuj zdarzenie na QWheelEvent
+            QWheelEvent *wheelEvent = static_cast<QWheelEvent*>(event);
+
+            // Ustaw współczynnik zoomu
+            double scaleFactor = 1.15;
+
+            if (wheelEvent->angleDelta().y() > 0) {
+                // Kręcenie kółkiem w górę (do siebie) - Zoom In
+                ui->graphicsView_3->scale(scaleFactor, scaleFactor);
+            } else {
+                // Kręcenie kółkiem w dół (od siebie) - Zoom Out
+                ui->graphicsView_3->scale(1.0 / scaleFactor, 1.0 / scaleFactor);
+            }
+
+            // Zjedliśmy to zdarzenie - nie puszczaj go dalej
+            return true;
+        }
     }
+
+    // Przekaż wszystkie inne zdarzenia (jak kliknięcia itp.)
+    // do domyślnej obsługi
     return QMainWindow::eventFilter(watched, event);
 }
 
+
 void MainWindow::on_DirectoryButton_clicked()
 {
+    // Użyj ostatnio wybranej ścieżki jako startowej, zamiast homePath
     QString startPath = m_dirModel->rootPath();
-    QString dirPath = QFileDialog::getExistingDirectory(this, tr("Wybierz folder"), startPath);
-    if (!dirPath.isEmpty()) {
-        m_selectedDirectory = dirPath;
-        ui->progressBar->show();
-        ui->treeView->setRootIndex(m_dirModel->setRootPath(dirPath));
-        appendLog("Wybrano folder: " + dirPath);
+
+    QString dirPath = QFileDialog::getExistingDirectory(this,
+                                                        tr("Wybierz folder"),
+                                                        startPath);
+    if (dirPath.isEmpty()) {
+        return;
     }
+
+    ui->progressBar->show();
+    ui->treeView->setRootIndex(m_dirModel->setRootPath(dirPath));
 }
 
-void MainWindow::onModelLoaded() { ui->progressBar->hide(); }
+void MainWindow::onModelLoaded()
+{
+    ui->progressBar->hide();
+}
 
 void MainWindow::on_treeView_clicked(const QModelIndex &index)
 {
-    if (m_dirModel->isDir(index)) return;
-    QString filePath = m_dirModel->filePath(index);
-    QPixmap pixmap(filePath);
-    if (!pixmap.isNull()) {
-        m_pixmapItem->setPixmap(pixmap);
-        ui->graphicsView_3->fitInView(m_pixmapItem, Qt::KeepAspectRatio);
-    }
-}
+    // (Jeśli masz proxy, tu musi być mapowanie na sourceIndex)
 
+    // 1. Sprawdź, czy to plik, a nie folder
+    if (m_dirModel->isDir(index)) {
+        // Czyść stary obrazek, jeśli kliknięto na folder
+        m_pixmapItem->setPixmap(QPixmap());
+        m_scene->setSceneRect(m_scene->itemsBoundingRect()); // Zresetuj widok
+        return;
+    }
+
+    // 2. Pobierz pełną ścieżkę do pliku z modelu
+    QString filePath = m_dirModel->filePath(index);
+
+    // 3. Wczytaj obraz do obiektu QPixmap
+    QPixmap pixmap(filePath);
+
+<<<<<<< Updated upstream
+    // 4. Sprawdź, czy obraz wczytał się poprawnie
+    if (pixmap.isNull()) {
+        m_pixmapItem->setPixmap(QPixmap()); // Czyść w razie błędu
+        m_scene->setSceneRect(m_scene->itemsBoundingRect());
+=======
 void MainWindow::on_pushButton_2_clicked()
 {
+    if (m_isRunning) {
+        onActualCancel();
+        return;
+    }
+
     if (m_selectedDirectory.isEmpty()) {
         QMessageBox::warning(this, "Błąd", "Najpierw wybierz folder ze zdjęciami!");
+>>>>>>> Stashed changes
         return;
     }
 
-    QDir imgDir(m_selectedDirectory);
-    if (imgDir.entryList(QStringList() << "*.jpg" << "*.png", QDir::Files).isEmpty()) {
-        QMessageBox::warning(this, "Brak zdjęć", "W wybranym folderze nie ma plików graficznych.");
-        return;
-    }
+    // 5. Zamiast ustawiać QLabel, podmień obrazek w naszym QGraphicsPixmapItem
+    m_pixmapItem->setPixmap(pixmap);
 
-    ui->pushButton_2->setEnabled(false);
+<<<<<<< Updated upstream
+    // 6. KLUCZOWY KROK: Powiedz widokowi, żeby automatycznie
+    //    dopasował zoom i pokazał cały obrazek
+    ui->graphicsView_3->fitInView(m_pixmapItem, Qt::KeepAspectRatio);
+
+=======
+    m_isRunning = true;
+    ui->pushButton_2->setText(tr("STOP"));
+    ui->pushButton_2->setEnabled(true);
+
     ui->textEdit->clear();
     appendLog("--- START PROCESU ---");
     ui->progressBar->setRange(0, 0);
@@ -216,6 +234,25 @@ void MainWindow::on_pushButton_2_clicked()
     } else {
         appendLog("Metoda: AI (" + QFileInfo(selection).fileName() + ")");
         emit requestAiReconstruction(m_selectedDirectory, selection);
+    }
+}
+
+void MainWindow::onStartOrCancelClicked()
+{
+    // forward to the autogenerated slot that already contains the start/cancel logic
+    on_pushButton_2_clicked();
+}
+
+void MainWindow::onActualCancel()
+{
+    ui->pushButton_2->setEnabled(false);
+    appendLog("Zatrzymywanie...");
+
+    if (m_manager) {
+        QMetaObject::invokeMethod(m_manager, "stop", Qt::QueuedConnection);
+    }
+    if (m_aiManager) {
+        QMetaObject::invokeMethod(m_aiManager, "stop", Qt::QueuedConnection);
     }
 }
 
@@ -240,6 +277,11 @@ void MainWindow::onReconstructionFinished(QString modelPath)
     if (rootObject) {
          QMetaObject::invokeMethod(rootObject, "loadModel", Q_ARG(QVariant, fileUrl.toString()));
     }
+    // Zamiana STOP na START
+    ui->pushButton_2->setText(tr("START"));
+    ui->pushButton_2->setStyleSheet("");
+    ui->pushButton_2->setEnabled(true);
+    m_isRunning = false;
 }
 
 void MainWindow::onErrorOccurred(QString message)
@@ -248,75 +290,25 @@ void MainWindow::onErrorOccurred(QString message)
     ui->pushButton_2->setEnabled(true);
     appendLog("!!! BŁĄD: " + message);
     QMessageBox::critical(this, "Błąd", message);
+
+    // Zamiana STOP na START
+    ui->pushButton_2->setText(tr("START"));
+    ui->pushButton_2->setStyleSheet("");
+    ui->pushButton_2->setEnabled(true);
+    m_isRunning = false;
+>>>>>>> Stashed changes
 }
 
 void MainWindow::on_actionO_programie_triggered()
 {
-    QMessageBox::about(this, "O programie", "ImageTo3D\nWersja: " PROJECT_VERSION);
+    // Używamy standardowego okna dialogowego "About"
+    QMessageBox::about(this, // Rodzic (to okno)
+                       tr("O programie ImageTo3D"), // Tytuł okna
+                       tr("<h3>ImageTo3D Konwerter</h3>" // Tekst (można używać HTML)
+                          "<p>Projekt na przedmiot Grafika i GUI.</p>"
+                          "<p><b>Wersja:</b> %1</p>" // Użyjemy %1 jako "placeholder"
+                          "<p>Autorzy: Jakub Jasiński, Kamil Pojedynek, Kacper Ulanowski</p>")
+                           .arg(PROJECT_VERSION) // Wstaw wersję z config.h w miejsce %1
+                       );
 }
 
-void MainWindow::refreshModelList()
-{
-    ui->comboBox_4->clear();
-    ui->comboBox_4->addItem("Fotogrametria (COLMAP)", "colmap");
-    QString modelsPath = QCoreApplication::applicationDirPath() + "/models";
-    QDir dir(modelsPath);
-    QStringList filters; filters << "*.onnx";
-    QFileInfoList files = dir.entryInfoList(filters, QDir::Files);
-    for (const QFileInfo &fi : files) {
-        ui->comboBox_4->addItem("AI: " + fi.fileName(), fi.absoluteFilePath());
-    }
-}
-
-// --- ŁADOWANIE MODELU Z KONWERSJĄ ASSIMP ---
-void MainWindow::on_pushButton_clicked()
-{
-    QString fileName = QFileDialog::getOpenFileName(this,
-                                                    tr("Open 3D Model"),
-                                                    QDir::homePath(),
-                                                    tr("3D Files (*.obj *.ply *.fbx *.glb *.gltf *.stl *.dae *.3ds);;All Files (*)"));
-
-    if (fileName.isEmpty()) return;
-
-    QString finalPath = fileName;
-    QFileInfo fi(fileName);
-    QString ext = fi.suffix().toLower();
-
-    // Konwersja na GLB dla Qt Quick 3D
-    if (ext != "glb" && ext != "gltf") {
-        appendLog("Konwersja modelu " + ext + " do GLB...");
-
-        QString outputDir = QDir::tempPath() + "/qt_model_conversion";
-        QDir().mkpath(outputDir);
-
-        // Timestamp dla unikalności (cache busting)
-        QString timestamp = QString::number(QDateTime::currentMSecsSinceEpoch());
-        QString outputFile = outputDir + "/model_" + timestamp + ".glb";
-
-        QProcess converter;
-        // Assimp musi być w PATH
-        converter.start("assimp", QStringList() << "export" << fileName << outputFile);
-
-        if (!converter.waitForFinished(30000)) {
-            appendLog("Błąd: Timeout konwersji assimp.");
-            return;
-        }
-
-        if (converter.exitCode() != 0) {
-            appendLog("Błąd konwersji: " + converter.readAllStandardError());
-        } else {
-            if (QFile::exists(outputFile)) {
-                finalPath = outputFile;
-                appendLog("Konwersja udana: " + finalPath);
-            }
-        }
-    }
-
-    QUrl fileUrl = QUrl::fromLocalFile(finalPath);
-    QQuickItem *rootObject = ui->view3DWidget->rootObject();
-
-    if (rootObject) {
-        ui->view3DWidget->setFocus();
-        QMetaObject::invokeMethod(rootObject, "loadModel", Q_ARG(QVariant, fileUrl.toString()));
-    }
-}

@@ -8,6 +8,7 @@
 #include <memory>
 #include <opencv2/opencv.hpp>
 #include <onnxruntime_cxx_api.h>
+#include <atomic>
 
 class AIReconstructionManager : public QObject
 {
@@ -18,6 +19,7 @@ public:
 
 public slots:
     void startAI(const QString &imagesPath, const QString &modelPath);
+    void stop(); // Zatrzymywanie
 
 signals:
     void progressUpdated(const QString &msg, int percentage);
@@ -57,7 +59,10 @@ private:
     std::vector<std::string> m_inputNameStrings;
     std::vector<std::string> m_outputNameStrings;
     
-    int m_subsample = 4; 
+    int m_subsample = 4;
+
+    // Flaga zatrzymywania
+    std::atomic<bool> m_abort{false};
 };
 
 #endif // AI_RECONSTRUCTIONMANAGER_H

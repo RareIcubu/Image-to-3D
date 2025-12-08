@@ -7,16 +7,29 @@
 #include <opencv2/imgproc.hpp>
 #include <opencv2/highgui.hpp>
 #include <algorithm> // dla std::max, std::min
+#include <QThread>
 
 AIReconstructionManager::AIReconstructionManager(QObject *parent) : QObject(parent) {
     m_modelLoaded = false;
     // Ustawiamy poziom logowania ORT
     m_ortEnv = std::make_shared<Ort::Env>(ORT_LOGGING_LEVEL_WARNING, "ImageTo3D_AI");
+     m_abort.store(false); // Zatrzymywanie
 }
 
-AIReconstructionManager::~AIReconstructionManager() {}
+AIReconstructionManager::~AIReconstructionManager() {
+    // request stop and give a short time for operations to finish
+    stop();
+    // If session holds resources, release it
+    m_session.reset();
+}
+
+void AIReconstructionManager::stop() {
+    m_abort.store(true);
+}
 
 bool AIReconstructionManager::loadModel(const QString &modelPath) {
+    if (m_abort.load()) return false; // Zatrzymywanie
+
     if (m_modelLoaded && m_currentModelPath == modelPath) return true;
 
     if (!QFile::exists(modelPath)) {
@@ -30,6 +43,8 @@ bool AIReconstructionManager::loadModel(const QString &modelPath) {
         Ort::SessionOptions sessionOptions;
         sessionOptions.SetIntraOpNumThreads(1);
         sessionOptions.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
+
+         if (m_abort.load()) return false; // Zatrzymywanie
 
         m_session = std::make_shared<Ort::Session>(*m_ortEnv, modelPath.toStdString().c_str(), sessionOptions);
 
@@ -86,10 +101,13 @@ bool AIReconstructionManager::loadModel(const QString &modelPath) {
 }
 
 cv::Mat AIReconstructionManager::runInference(const cv::Mat &img) {
+    if (m_abort.load()) return cv::Mat(); // Zatrzymywanie
     if (!m_modelLoaded) return cv::Mat();
 
     // 1. Preprocessing
+    if (m_abort.load()) return cv::Mat(); // Zatrzymywanie
     cv::Mat imgRGB, imgResized;
+    if (m_abort.load()) return cv::Mat(); // Zatrzymywanie
     cv::cvtColor(img, imgRGB, cv::COLOR_BGR2RGB);
     cv::resize(imgRGB, imgResized, cv::Size(m_inputWidth, m_inputHeight), 0, 0, cv::INTER_CUBIC);
 
@@ -99,11 +117,14 @@ cv::Mat AIReconstructionManager::runInference(const cv::Mat &img) {
     // Dla DPT i MiDaS często stosuje się normalizację ImageNet
     cv::Scalar mean(0.485, 0.456, 0.406);
     cv::Scalar std(0.229, 0.224, 0.225);
-    imgResized = (imgResized - mean) / std;
+    if (m_abort.load()) return cv::Mat();
+    imgResized = (imgResized - mean) / std; // Zatrzymywanie
 
     // HWC -> NCHW
+    if (m_abort.load()) return cv::Mat(); // Zatrzymywanie
     cv::Mat blob = cv::dnn::blobFromImage(imgResized);
 
+    if (m_abort.load()) return cv::Mat(); // Zatrzymywanie
     size_t inputTensorSize = 1 * 3 * m_inputHeight * m_inputWidth;
     std::vector<int64_t> inputDims = {1, 3, m_inputHeight, m_inputWidth};
 
@@ -114,9 +135,11 @@ cv::Mat AIReconstructionManager::runInference(const cv::Mat &img) {
 
     try {
         // 2. Inferencja
+        if (m_abort.load()) return cv::Mat(); // Zatrzymywanie
         auto outputTensors = m_session->Run(
             Ort::RunOptions{nullptr}, m_inputNames.data(), &inputTensor, 1, m_outputNames.data(), 1
         );
+        if (m_abort.load()) return cv::Mat(); // Zatrzymywanie
 
         float* floatArr = outputTensors.front().GetTensorMutableData<float>();
         cv::Mat depthMap(m_inputHeight, m_inputWidth, CV_32F, floatArr);
@@ -125,9 +148,11 @@ cv::Mat AIReconstructionManager::runInference(const cv::Mat &img) {
         // Sprowadzamy wszystko do zakresu 0.0 (daleko/tło) - 1.0 (blisko).
         // Dzięki temu algorytm generowania punktów zawsze działa tak samo.
         
+        if (m_abort.load()) return cv::Mat();
         double minVal, maxVal;
         cv::minMaxLoc(depthMap, &minVal, &maxVal);
         
+        if (m_abort.load()) return cv::Mat(); // Zatrzymywanie
         cv::Mat depthNormalized;
         if (maxVal - minVal > 1e-6) {
             // Wzór: (val - min) / (max - min)
@@ -137,8 +162,10 @@ cv::Mat AIReconstructionManager::runInference(const cv::Mat &img) {
         }
 
         // Resize do oryginału
+        if (m_abort.load()) return cv::Mat(); // Zatrzymywanie
         cv::Mat depthFinal;
         cv::resize(depthNormalized, depthFinal, img.size(), 0, 0, cv::INTER_CUBIC);
+        if (m_abort.load()) return cv::Mat(); // Zatrzymywanie
 
         return depthFinal.clone();
 
@@ -193,6 +220,7 @@ void AIReconstructionManager::analyzeDepthMap(const cv::Mat& depth) {
 void AIReconstructionManager::startAI(const QString &imagesPath, const QString &modelPath)
 {
     m_timer.restart();
+    m_abort.store(false); // Zatrzymywanie
     
     // --- Foldery ---
     QDir sourceDir(imagesPath);
@@ -214,6 +242,11 @@ void AIReconstructionManager::startAI(const QString &imagesPath, const QString &
     int total = files.size();
 
     for (int i = 0; i < total; ++i) {
+        if (m_abort.load()) {
+            emit errorOccurred("Zatrzymano przez użytkownika");
+            return;
+        }
+
         QFileInfo fi = files[i];
         QString msg = QString("AI [%1/%2]: %3").arg(i+1).arg(total).arg(fi.fileName());
         emit progressUpdated(msg, -1);
@@ -222,14 +255,27 @@ void AIReconstructionManager::startAI(const QString &imagesPath, const QString &
         cv::Mat img = cv::imread(fi.absoluteFilePath().toStdString());
         if (img.empty()) continue;
 
+        if (m_abort.load()) {
+            emit errorOccurred("Zatrzymano przez użytkownika");
+            return;
+        }
+
         cv::Mat imgRGB;
         cv::cvtColor(img, imgRGB, cv::COLOR_BGR2RGB);
 
         // Inferencja (zwraca znormalizowane 0..1)
         cv::Mat depth = runInference(img);
+        if (m_abort.load()) {
+            emit errorOccurred("Zatrzymano przez użytkownika");
+            return;
+        }
         if (depth.empty()) continue;
         
         analyzeDepthMap(depth);
+        if (m_abort.load()) {
+            emit errorOccurred("Cancelled by user");
+            return;
+        }
         saveDepthAsPNG(workspacePath + "/" + fi.completeBaseName() + "_depth.png", depth);
 
         // --- GENEROWANIE CHMURY 3D ---
@@ -247,7 +293,9 @@ void AIReconstructionManager::startAI(const QString &imagesPath, const QString &
         float depthScale = 2000.0f; 
 
         for (int y = 0; y < depth.rows; y += m_subsample) {
+            if (m_abort.load()) break;
             for (int x = 0; x < depth.cols; x += m_subsample) {
+                if (m_abort.load()) break;
                 float d = depth.at<float>(y, x); // Wartość 0.0 - 1.0
 
                 // Odsiewamy tło (np. wszystko co ma wartość mniejszą niż 0.1)
@@ -280,12 +328,21 @@ void AIReconstructionManager::startAI(const QString &imagesPath, const QString &
                 currentPoints.emplace_back(p);
             }
         }
+        if (m_abort.load()) {
+            emit errorOccurred("Zatrzymano przez użytkownika");
+            return;
+        }
 
         QString plyPath = workspacePath + "/" + fi.completeBaseName() + ".ply";
         savePointCloudPLY(plyPath, currentPoints);
 
         int percent = ((i + 1) * 100) / total;
         emit progressUpdated("", percent);
+    }
+
+    if (m_abort.load()) {
+        emit errorOccurred("Zatrzymano przez użytkownika");
+        return;
     }
 
     emit finished(workspacePath);

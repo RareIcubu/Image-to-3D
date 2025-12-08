@@ -8,16 +8,19 @@
 #include <QString>
 #include <QDebug>
 #include <QElapsedTimer>
+#include <atomic>
 
 class ReconstructionManager : public QObject {
     Q_OBJECT
 
 public:
     explicit ReconstructionManager(QObject *parent = nullptr);
+    ~ReconstructionManager();
 
 public slots:
     // Marked as a SLOT to be triggered safely from the Main Thread
     void startReconstruction(const QString &imagesPath, const QString &outputPath);
+    void stop();
 
 signals:
     void progressUpdated(QString step, int percentage);
@@ -38,6 +41,9 @@ private:
 
     // SET THIS TO TRUE TO SKIP DENSE RECONSTRUCTION
     bool m_useFastMode = true;
+
+    // Flaga zatrzymywania
+    std::atomic<bool> m_abort{false};
 };
 
 #endif // RECONSTRUCTIONMANAGER_H
