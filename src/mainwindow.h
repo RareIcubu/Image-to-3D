@@ -92,6 +92,9 @@ private:
 
     // This variable will store your unique list of images
     QSet<QString> m_selectedImages; // <--- ADD THIS
+
+    QDir createAndGetSubDir(const QDir &parentDir);
+    void createSymlinksForFiles(const QSet<QString> &sourceFiles, const QDir &targetDir);
 };
 
 #endif // MAINWINDOW_H

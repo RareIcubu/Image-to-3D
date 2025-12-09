@@ -17,6 +17,8 @@
 #include <QQuickItem>
 #include <QProcess>
 #include <QDirIterator>
+#include <QFile>
+#include <QFileInfo>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -214,14 +216,107 @@ void MainWindow::on_treeView_clicked(const QModelIndex &index)
     qDebug() << "Total unique images selected:" << m_selectedImages.size();
 }
 
+// Function definition
+QDir MainWindow::createAndGetSubDir(const QDir &parentDir) {
+    const QString &newFolderName = "SelectedImg";
+
+    // 1. Construct the full target path
+    QString fullPath = parentDir.filePath(newFolderName);
+    QDir targetDir(fullPath);
+
+    // --- SAFETY CHECKS START ---
+
+    // Normalize path to remove redundant separators (e.g. "//") or relative dots ("..")
+    QString cleanPath = QDir::cleanPath(targetDir.absolutePath());
+
+    // Check A: Prevent deleting the System Root
+    if (cleanPath == QDir::rootPath() || cleanPath == "/") {
+        qWarning() << "SAFETY ABORT: Attempted to delete system root!";
+        return parentDir; // Return parent (or handle error differently)
+    }
+
+    // Check B: Prevent deleting the Parent Directory itself
+    // (e.g. if newFolderName was empty or ".")
+    if (cleanPath == QDir::cleanPath(parentDir.absolutePath())) {
+        qWarning() << "SAFETY ABORT: Attempted to delete the parent directory!";
+        return parentDir;
+    }
+
+    // Check C: Prevent deleting the User Home folder (optional but recommended)
+    if (cleanPath == QDir::homePath()) {
+        qWarning() << "SAFETY ABORT: Attempted to delete home directory!";
+        return parentDir;
+    }
+
+    // --- SAFETY CHECKS END ---
+
+    // 2. Clean Slate: Remove if exists
+    if (targetDir.exists()) {
+        qDebug() << "Cleaning up existing directory:" << cleanPath;
+        if (!targetDir.removeRecursively()) {
+            qWarning() << "Error: Failed to delete old directory. Check permissions/locks.";
+            // You might want to return here or proceed depending on your needs
+        }
+    }
+
+    // 1. Attempt to create the path.
+    // mkpath returns true if it is created OR if it already exists.
+    if (parentDir.mkpath(newFolderName)) {
+        qDebug() << "Directory structure ensures:" << newFolderName;
+    } else {
+        qDebug() << "Failed to create directory (check permissions).";
+    }
+
+    // 2. Return a new QDir object pointing to the new full path.
+    // .filePath() automatically handles adding the '/' separator.
+    return QDir(parentDir.filePath(newFolderName));
+}
+
+void MainWindow::createSymlinksForFiles(const QSet<QString> &sourceFiles, const QDir &targetDir) {
+    if (!targetDir.exists()) {
+        qDebug() << "Target directory does not exist!";
+        return;
+    }
+
+    for (const QString &fullSourcePath : sourceFiles) {
+        // 1. Extract the file name (e.g., "/var/log/syslog" -> "syslog")
+        QFileInfo fileInfo(fullSourcePath);
+        QString fileName = fileInfo.fileName();
+
+        // 2. Define where the symlink will live inside your new directory
+        QString linkPath = targetDir.filePath(fileName);
+
+        // 3. Create the symlink
+        // QFile::link(target_file, link_location)
+        // Returns true on success, false if it fails (e.g., link already exists)
+        if (QFile::link(fullSourcePath, linkPath)) {
+            qDebug() << "Linked:" << fileName;
+        } else {
+            qDebug() << "Failed (exists?):" << fileName;
+        }
+    }
+}
+
 void MainWindow::on_pushButton_2_clicked()
 {
+
     if (m_selectedDirectory.isEmpty()) {
         QMessageBox::warning(this, "Błąd", "Najpierw wybierz folder ze zdjęciami!");
         return;
     }
 
     QDir imgDir(m_selectedDirectory);
+
+    if (!m_selectedImages.isEmpty()) {
+        QDir targetDir = imgDir;
+        targetDir.cdUp();
+        imgDir = createAndGetSubDir(targetDir);
+
+        m_selectedDirectory = imgDir.dirName();
+
+        createSymlinksForFiles(m_selectedImages, imgDir);
+    }
+
     if (imgDir.entryList(QStringList() << "*.jpg" << "*.png", QDir::Files).isEmpty()) {
         QMessageBox::warning(this, "Brak zdjęć", "W wybranym folderze nie ma plików graficznych.");
         return;
@@ -382,3 +477,5 @@ void MainWindow::on_actionExportLogs_triggered()
     // You can remove this line if you want it to be silent
     QMessageBox::information(this, "Sukces", "Logi wyeksportowane do:\n" + filePath);
 }
+
+
