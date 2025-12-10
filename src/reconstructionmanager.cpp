@@ -70,7 +70,7 @@ void ReconstructionManager::runNextStep() {
 
         if (useNvidiaFix) {
             // FIX DLA NVIDIA: CPU + Mniejsze zdjęcia (Brak Crashy, Brak OOM)
-            colmapArgs << "--FeatureExtraction.use_gpu=1";
+            colmapArgs << "--SiftExtraction.use_gpu=1";
             colmapArgs << "--SiftExtraction.max_image_size=1600";
             //colmapArgs << "--FeatureExtraction.num_threads" << "4";
 
