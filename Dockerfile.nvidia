@@ -1,54 +1,78 @@
-# ETAP 1: BASE (Ubuntu 24.04 + Nvidia Prep)
-FROM ubuntu:24.04 AS base
+# Dockerfile.hybrid - Ubuntu 22.04 LTS + Qt 6.7 + Fix Boost Filesystem
+FROM nvidia/cuda:12.2.2-devel-ubuntu22.04 AS base
 
 ENV TZ=Europe/Warsaw
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ >/etc/timezone
 
-# Instalacja zależności
-# POPRAWKA: Usunięto 'libgl1-mesa-glx' (nie istnieje w Ubuntu 24.04)
+# 1. Install System Dependencies
+# 1. Install System Dependencies (Zaktualizowana lista dla COLMAP 3.9.1)
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    build-essential cmake ninja-build git pkg-config wget unzip ca-certificates \
-    # Grafika 
-    libgl1 libgl1-mesa-dri mesa-utils \
-    libx11-dev libxcb-glx0 \
-    # Dodatki Wayland/Nvidia
-    libnvidia-egl-wayland1 libwayland-egl1 qt6-wayland \
-    # QT DEV
-    qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools \
-    libqt6core5compat6-dev qt6-declarative-dev qt6-quick3d-dev \
-    libqt6opengl6-dev libqt6shadertools6-dev qt6-quick3d-dev-tools \
-    # Inne
-    assimp-utils libassimp-dev \
-    qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtquick-controls \
-    qml6-module-qtquick-layouts qml6-module-qtqml-workerscript qml6-module-qtquick-templates \
-    colmap meshlab x11-apps \
-    libopencv-dev python3-dev python3-numpy \
-    libvulkan-dev vulkan-tools \
+    # Build Tools
+    git cmake ninja-build build-essential wget unzip ca-certificates python3-pip \
+    # System Graphics & Input (FIX: Dodano libxkbcommon-dev i libvulkan-dev)
+    libgl1 libgl1-mesa-dri mesa-utils libxkbcommon-x11-0 libxkbcommon-dev \
+    libnvidia-egl-wayland1 libwayland-egl1 libvulkan-dev \
+    # COLMAP Dependencies
+    libboost-program-options-dev libboost-filesystem-dev libboost-graph-dev \
+    libboost-system-dev libboost-test-dev \
+    libflann-dev liblz4-dev \
+    libeigen3-dev libfreeimage-dev libmetis-dev libgoogle-glog-dev \
+    libgflags-dev libopenimageio-dev openimageio-tools \
+    libgtest-dev libgmock-dev libsqlite3-dev libglew-dev \
+    libcgal-dev libceres-dev libcurl4-openssl-dev libssl-dev \
+    libatlas-base-dev liblapack-dev \
+    # Runtime deps for Qt
+    libfontconfig1 libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-image0 \
+    libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 \
+    libxcb-sync1 libxcb-xfixes0 libxcb-xinerama0 libxcb-xkb1 \
+    # Other
+    meshlab libassimp-dev libopencv-dev \
     && rm -rf /var/lib/apt/lists/*
+# 2. INSTALL QT 6.7 VIA AQTINSTALL
+# FIX: Dodano "qtquicktimeline" do listy modułów (Wymagane przez AssetUtils)
+RUN pip3 install aqtinstall && \
+    aqt install-qt linux desktop 6.7.2 linux_gcc_64 --outputdir /opt/qt \
+    --modules qt3d qtquick3d qtshadertools qtimageformats qt5compat qtquicktimeline && \
+    ln -s /opt/qt/6.7.2/gcc_64/bin/qmake /usr/bin/qmake
 
-# Rejestracja Nvidii
-RUN mkdir -p /usr/share/glvnd/egl_vendor.d && \
-    echo '{"file_format_version" : "1.0.0", "ICD" : { "library_path" : "libEGL_nvidia.so.0" }}' > /usr/share/glvnd/egl_vendor.d/10_nvidia.json
+ENV PATH="/opt/qt/6.7.2/gcc_64/bin:${PATH}"
+ENV Qt6_DIR="/opt/qt/6.7.2/gcc_64/lib/cmake/Qt6"
+ENV QT_PLUGIN_PATH="/opt/qt/6.7.2/gcc_64/plugins"
+ENV QML2_IMPORT_PATH="/opt/qt/6.7.2/gcc_64/qml"
+ENV LD_LIBRARY_PATH="/opt/qt/6.7.2/gcc_64/lib:${LD_LIBRARY_PATH}"
 
-# ONNX
+# 3. COMPILE COLMAP (STABLE 3.9.1)
 WORKDIR /tmp
-RUN wget -q https://github.com/microsoft/onnxruntime/releases/download/v1.17.1/onnxruntime-linux-x64-1.17.1.tgz \
+RUN git config --global http.sslVerify false && \
+    git clone --branch 3.9.1 https://github.com/colmap/colmap.git && \
+    cd colmap && \
+    mkdir build && cd build && \
+    cmake .. -GNinja \
+    -DCMAKE_CUDA_ARCHITECTURES=75 \
+    -DCMAKE_BUILD_TYPE=Release \
+    # FIX: Wyłączamy GUI, żeby nie szukał Qt5 (którego nie ma)
+    -DGUI_ENABLED=OFF \
+    -DBLA_VENDOR=Generic && \
+    ninja && \
+    ninja install && \
+    cd /tmp && rm -rf colmap
+
+# 4. ONNX Runtime
+WORKDIR /tmp
+RUN wget -q --no-check-certificate https://github.com/microsoft/onnxruntime/releases/download/v1.17.1/onnxruntime-linux-x64-1.17.1.tgz \
     && tar -xf onnxruntime-linux-x64-1.17.1.tgz \
     && cp -r onnxruntime-linux-x64-1.17.1/include/* /usr/local/include/ \
     && cp -r onnxruntime-linux-x64-1.17.1/lib/* /usr/local/lib/ \
     && rm -rf onnxruntime* \
     && ldconfig
 
-# User
+# 5. User Setup
 ARG USER_ID
 ARG GROUP_ID
 RUN userdel -r ubuntu || true && groupdel ubuntu || true
 RUN groupadd -g ${GROUP_ID:-1000} devgroup && \
     useradd -l -u ${USER_ID:-1000} -g devgroup -m devuser
-
-# Grupy wideo
 RUN usermod -aG video devuser || true
-RUN groupadd -f render && usermod -aG render devuser || true
 
 USER devuser
 WORKDIR /app
@@ -61,48 +85,53 @@ WORKDIR /app/src/
 RUN rm -rf build && mkdir build && cd build && \
     cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release && ninja
 
-# ETAP 3: FINAL
-FROM ubuntu:24.04 AS final
+# ETAP 3: FINAL (Runtime)
+FROM nvidia/cuda:12.2.2-runtime-ubuntu22.04 AS final
 ENV TZ=Europe/Warsaw
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ >/etc/timezone
 
-# POPRAWKA: Tutaj też usuwamy 'libgl1-mesa-glx'
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    libqt6widgets6 libqt6gui6 libqt6core6 libqt6core5compat6 \
-    qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtquick-controls \
-    qml6-module-qtquick-layouts qml6-module-qtqml-workerscript qml6-module-qtquick-templates \
-    libqt6quicktemplates2-6 \
-    libqt6quick3d6 libqt6quick3dhelpers6 libqt6quick3dassetimport6 \
-    libqt6quick3dparticleeffects6 libqt6quick3druntimerender6 \
-    libqt6opengl6 libqt6shadertools6 qt6-quick3d-assetimporters-plugin \
-    # Libs for runtime
-    libassimp-dev libvulkan1 libopencv-dev colmap x11-apps libx11-6 \
-    libgl1 \ 
-    libnvidia-egl-wayland1 libwayland-egl1 qt6-wayland \
+    libgl1 libgl1-mesa-dri mesa-utils libxkbcommon-x11-0 \
+    libnvidia-egl-wayland1 libwayland-egl1 \
+    # Biblioteki systemowe (FIX: Dodano libboost-filesystem)
+    libboost-program-options1.74.0 libboost-graph1.74.0 \
+    libboost-system1.74.0 libboost-filesystem1.74.0 \
+    # ----------------------------------------------------
+    libfreeimage3 libgoogle-glog0v5 libgflags2.2 \
+    libopenimageio2.2 \
+    libsqlite3-0 libglew2.2 libcgal5 libceres2 libcurl4 libssl3 \
+    libatlas-base-dev liblapack3 \
+    # Runtime deps dla Qt
+    libfontconfig1 libdbus-1-3 libxcb-cursor0 \
+    libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 \
+    libxcb-render-util0 libxcb-shape0 libxcb-sync1 libxcb-xfixes0 \
+    libxcb-xinerama0 libxcb-xkb1 \
+    # Other
+    libassimp5 libvulkan1 libopencv-core4.5d libopencv-imgproc4.5d libopencv-imgcodecs4.5d libx11-6 \
     && rm -rf /var/lib/apt/lists/*
 
-# Kopiowanie ONNX
+RUN mkdir -p /usr/share/glvnd/egl_vendor.d && \
+    echo '{"file_format_version" : "1.0.0", "ICD" : { "library_path" : "libEGL_nvidia.so.0" }}' > /usr/share/glvnd/egl_vendor.d/10_nvidia.json
+
+COPY --from=base /usr/local/bin/colmap /usr/bin/colmap
+COPY --from=base /usr/local/share/colmap /usr/share/colmap
 COPY --from=base /usr/local/lib/libonnxruntime.so* /usr/local/lib/
-RUN ldconfig
 
-# Kopiowanie Qt Plugins/QML
-COPY --from=builder /usr/lib/x86_64-linux-gnu/qt6/qml /usr/lib/x86_64-linux-gnu/qt6/qml
-COPY --from=builder /usr/lib/x86_64-linux-gnu/qt6/plugins /usr/lib/x86_64-linux-gnu/qt6/plugins
+COPY --from=base /opt/qt/6.7.2/gcc_64/lib /opt/qt/6.7.2/gcc_64/lib
+COPY --from=base /opt/qt/6.7.2/gcc_64/plugins /opt/qt/6.7.2/gcc_64/plugins
+COPY --from=base /opt/qt/6.7.2/gcc_64/qml /opt/qt/6.7.2/gcc_64/qml
 
-# Zmienne środowiskowe (RUNTIME)
-ENV QML2_IMPORT_PATH=/usr/lib/x86_64-linux-gnu/qt6/qml
-ENV QT_PLUGIN_PATH=/usr/lib/x86_64-linux-gnu/qt6/plugins
+ENV LD_LIBRARY_PATH="/opt/qt/6.7.2/gcc_64/lib:${LD_LIBRARY_PATH}"
+ENV QT_PLUGIN_PATH="/opt/qt/6.7.2/gcc_64/plugins"
+ENV QML2_IMPORT_PATH="/opt/qt/6.7.2/gcc_64/qml"
+ENV QML_IMPORT_PATH="/opt/qt/6.7.2/gcc_64/qml"
 ENV QT_QPA_PLATFORM=xcb
-ENV QT_XCB_GL_INTEGRATION=xcb_glx
-ENV QSG_RHI_BACKEND=opengl
 ENV XDG_RUNTIME_DIR=/tmp/runtime-app
 
 RUN mkdir -p /tmp/runtime-app && chmod 777 /tmp/runtime-app
 RUN useradd -ms /bin/bash appuser
 USER appuser
 WORKDIR /home/appuser
-
 COPY --from=builder /app/src/build/ImageTo3D .
 COPY src/models ./models
-
 CMD ["./ImageTo3D"]

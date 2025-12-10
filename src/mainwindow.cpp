@@ -297,11 +297,6 @@ void MainWindow::on_pushButton_clicked()
         // Assimp musi być w PATH
         converter.start("assimp", QStringList() << "export" << fileName << outputFile);
 
-        if (!converter.waitForFinished(30000)) {
-            appendLog("Błąd: Timeout konwersji assimp.");
-            return;
-        }
-
         if (converter.exitCode() != 0) {
             appendLog("Błąd konwersji: " + converter.readAllStandardError());
         } else {
