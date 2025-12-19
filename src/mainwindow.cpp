@@ -220,7 +220,6 @@ void MainWindow::on_pushButton_2_clicked()
 
     m_isRunning = true;
     ui->pushButton_2->setText(tr("STOP"));
-    ui->pushButton_2->setStyleSheet("background-color:#d9534f;color:white;");
     ui->pushButton_2->setEnabled(true); // allow cancel press
 
     ui->textEdit->clear();

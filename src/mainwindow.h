@@ -60,8 +60,6 @@ private slots:
     void onStartOrCancelClicked();
     void onActualCancel();
 
-    bool m_isRunning = false;
-
     // Dark Mode
     void toggleTheme();
 

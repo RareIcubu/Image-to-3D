@@ -269,11 +269,14 @@ void AIReconstructionManager::startAI(const QString &imagesPath, const QString &
             emit errorOccurred("Zatrzymano przez użytkownika");
             return;
         }
-        if (depth.empty()) continue;
+        if (depth.empty()) {
+            emit errorOccurred("Zatrzymo przez użytkownika");
+            return;
+        }
         
         analyzeDepthMap(depth);
         if (m_abort.load()) {
-            emit errorOccurred("Cancelled by user");
+            emit errorOccurred("Zatrzymo przez użytkownika");
             return;
         }
         saveDepthAsPNG(workspacePath + "/" + fi.completeBaseName() + "_depth.png", depth);
