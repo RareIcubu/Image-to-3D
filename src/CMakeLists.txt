@@ -46,8 +46,8 @@ add_executable(ImageTo3D
     mainwindow.ui
     reconstructionmanager.cpp
     reconstructionmanager.h
-    ai_reconstructionmanager.cpp
-    ai_reconstructionmanager.h
+ #   ai_reconstructionmanager.cpp
+ #   ai_reconstructionmanager.h
     viewer.qml
     Theme.cpp
     Theme.h
@@ -57,6 +57,20 @@ add_executable(ImageTo3D
     # Jeśli zmienisz numer w version.txt, CMake automatycznie przebuduje config.h!
     version.txt
     config.h.in
+)
+
+# AI w oddzielnym procesie
+add_executable(ai_worker
+    ai_worker_main.cpp
+    ai_worker.cpp
+    ai_worker.h
+)
+
+target_link_libraries(ai_worker
+    PRIVATE
+        Qt6::Core
+        ${OpenCV_LIBS}
+        ${ONNX_LIB}
 )
 
 target_link_libraries(ImageTo3D PRIVATE

@@ -7,10 +7,11 @@
 #include <QDir>
 #include <QThread>
 #include <QQuickWidget>
+#include <QProcess>
 
 // --- INCLUDE NASZYCH SILNIKÓW ---
 #include "reconstructionmanager.h"
-#include "ai_reconstructionmanager.h" // Nowa klasa ONNX Runtime
+//#include "ai_reconstructionmanager.h" // Nowa klasa ONNX Runtime
 
 class QFileSystemModel;
 class QGraphicsScene;
@@ -33,7 +34,7 @@ signals:
     void requestReconstruction(const QString &imagesPath, const QString &outputPath);
     
     // Sygnał dla AI (AI samo tworzy swój folder roboczy "_ai_workspace")
-    void requestAiReconstruction(const QString &imagesPath, const QString &modelPath);
+//    void requestAiReconstruction(const QString &imagesPath, const QString &modelPath);
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -75,8 +76,8 @@ private:
     QThread *m_workerThread;
 
     // Silnik 2: AI (ONNX Runtime)
-    AIReconstructionManager *m_aiManager;
-    QThread *m_aiThread;
+//    AIReconstructionManager *m_aiManager;
+//    QThread *m_aiThread;
 
     // Grafika 2D
     QGraphicsScene *m_scene;
@@ -87,6 +88,8 @@ private:
 
     QAction *m_actionToggleTheme = nullptr;
     bool m_isRunning = false;
+
+    QProcess *m_aiProcess = nullptr;
 };
 
 #endif // MAINWINDOW_H

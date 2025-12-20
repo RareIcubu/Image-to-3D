@@ -24,8 +24,8 @@ MainWindow::MainWindow(QWidget *parent)
     , m_dirModel(new QFileSystemModel(this))
     , m_manager(new ReconstructionManager())
     , m_workerThread(new QThread(this))
-    , m_aiManager(new AIReconstructionManager())
-    , m_aiThread(new QThread(this))
+//    , m_aiManager(new AIReconstructionManager())
+//    , m_aiThread(new QThread(this))
     , m_scene(new QGraphicsScene(this))
     , m_pixmapItem(new QGraphicsPixmapItem())
 {
@@ -69,13 +69,39 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_workerThread, &QThread::finished, m_manager, &QObject::deleteLater);
     m_workerThread->start();
 
-    m_aiManager->moveToThread(m_aiThread);
+    /*m_aiManager->moveToThread(m_aiThread);
     connect(this, &MainWindow::requestAiReconstruction, m_aiManager, &AIReconstructionManager::startAI);
     connect(m_aiManager, &AIReconstructionManager::progressUpdated, this, &MainWindow::onProgressUpdated);
     connect(m_aiManager, &AIReconstructionManager::finished, this, &MainWindow::onReconstructionFinished);
     connect(m_aiManager, &AIReconstructionManager::errorOccurred, this, &MainWindow::onErrorOccurred);
     connect(m_aiThread, &QThread::finished, m_aiManager, &QObject::deleteLater);
-    m_aiThread->start();
+    m_aiThread->start();*/
+
+    // Wersja w oddzielnym procesie
+    m_aiProcess = new QProcess(this);
+
+    connect(m_aiProcess, &QProcess::readyReadStandardOutput, this, [this]() {
+        QString out = m_aiProcess->readAllStandardOutput();
+        appendLog(out.trimmed());
+    });
+
+    connect(m_aiProcess, &QProcess::readyReadStandardError, this, [this]() {
+        QString err = m_aiProcess->readAllStandardError();
+        appendLog("AI ERROR: " + err.trimmed());
+    });
+
+    connect(m_aiProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+            this, [this](int code, QProcess::ExitStatus status) {
+                m_isRunning = false;
+                ui->pushButton_2->setText("START");
+                ui->progressBar->hide();
+
+                if (status == QProcess::NormalExit && code == 0) {
+                    appendLog("AI finished successfully.");
+                } else {
+                    appendLog("AI stopped or crashed.");
+                }
+            });
 
     // === DARK MODE ===
 
@@ -91,22 +117,20 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    if (m_aiProcess && m_aiProcess->state() != QProcess::NotRunning) {
+        m_aiProcess->kill();
+        m_aiProcess->waitForFinished();
+    }
+
     // Ask managers to stop and ensure stop() executes in their threads before proceeding
     if (m_manager) {
         QMetaObject::invokeMethod(m_manager, "stop", Qt::BlockingQueuedConnection);
-    }
-    if (m_aiManager) {
-        QMetaObject::invokeMethod(m_aiManager, "stop", Qt::BlockingQueuedConnection);
     }
 
     // Quit and join threads
     if (m_workerThread) {
         m_workerThread->quit();
         m_workerThread->wait();
-    }
-    if (m_aiThread) {
-        m_aiThread->quit();
-        m_aiThread->wait();
     }
 
     delete ui;
@@ -238,7 +262,23 @@ void MainWindow::on_pushButton_2_clicked()
         emit requestReconstruction(m_selectedDirectory, outputDir);
     } else {
         appendLog("Metoda: AI (" + QFileInfo(selection).fileName() + ")");
-        emit requestAiReconstruction(m_selectedDirectory, selection);
+        //emit requestAiReconstruction(m_selectedDirectory, selection);
+        QString workerPath =
+            QCoreApplication::applicationDirPath() + "/ai_worker";
+
+        QString imagesPath = m_selectedDirectory;
+        QString modelPath  = selection;
+
+        QDir srcDir(imagesPath);
+        QString outputPath = srcDir.absolutePath() + "_ai_workspace";
+
+        QStringList args;
+        args << imagesPath << modelPath << outputPath;
+
+        m_aiProcess->start(workerPath, args);
+
+        appendLog("Uruchomiono AI.");
+
     }
 }
 
@@ -258,8 +298,11 @@ void MainWindow::onActualCancel()
     if (m_manager) {
         QMetaObject::invokeMethod(m_manager, "stop", Qt::QueuedConnection);
     }
-    if (m_aiManager) {
-        QMetaObject::invokeMethod(m_aiManager, "stop", Qt::QueuedConnection);
+    if (m_aiProcess && m_aiProcess->state() != QProcess::NotRunning) {
+        appendLog("Zatrzymywanie procesu AI");
+        m_aiProcess->kill();   // myself at this point
+        m_aiProcess->waitForFinished();
+        ui->pushButton_2->setEnabled(true);
     }
 }
 
