@@ -16,6 +16,7 @@
 class QFileSystemModel;
 class QGraphicsScene;
 class QGraphicsPixmapItem;
+class MvsRunner;
 
 namespace Ui {
 class MainWindow;
@@ -90,6 +91,10 @@ private:
     bool m_isRunning = false;
 
     QProcess *m_aiProcess = nullptr;
+
+    // MVS
+    MvsRunner* m_mvs = nullptr;
+    QThread* m_mvsThread = nullptr;
 };
 
 #endif // MAINWINDOW_H

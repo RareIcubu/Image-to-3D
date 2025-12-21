@@ -18,6 +18,8 @@
 #include <QProcess>
 #include <QDirIterator>
 
+#include "mvs_runner.h"
+
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
@@ -113,6 +115,18 @@ MainWindow::MainWindow(QWidget *parent)
         ui->menu_Widok->addSeparator();
         ui->menu_Widok->addAction(m_actionToggleTheme);
     }
+
+    // === MVS ===
+    m_mvs = new MvsRunner();
+    m_mvsThread = new QThread(this);
+
+    m_mvs->moveToThread(m_mvsThread);
+
+    connect(m_mvs, &MvsRunner::log, this, &MainWindow::appendLog);
+    connect(m_mvs, &MvsRunner::finished, this, &MainWindow::onReconstructionFinished);
+    connect(m_mvs, &MvsRunner::error, this, &MainWindow::onErrorOccurred);
+
+    m_mvsThread->start();
 }
 
 MainWindow::~MainWindow()
@@ -131,6 +145,16 @@ MainWindow::~MainWindow()
     if (m_workerThread) {
         m_workerThread->quit();
         m_workerThread->wait();
+    }
+
+    // MVS stopping
+    if (m_mvs) {
+        QMetaObject::invokeMethod(m_mvs, "stop", Qt::BlockingQueuedConnection);
+    }
+
+    if (m_mvsThread) {
+        m_mvsThread->quit();
+        m_mvsThread->wait();
     }
 
     delete ui;
@@ -226,6 +250,9 @@ void MainWindow::on_treeView_clicked(const QModelIndex &index)
 
 void MainWindow::on_pushButton_2_clicked()
 {
+    QString selection = ui->comboBox_4->currentData().toString();
+    QDir imgDir(m_selectedDirectory);
+
     if (m_isRunning) {
         onActualCancel();
         return;
@@ -236,10 +263,46 @@ void MainWindow::on_pushButton_2_clicked()
         return;
     }
 
-    QDir imgDir(m_selectedDirectory);
-    if (imgDir.entryList(QStringList() << "*.jpg" << "*.png", QDir::Files).isEmpty()) {
-        QMessageBox::warning(this, "Brak zdjęć", "W wybranym folderze nie ma plików graficznych.");
-        return;
+    // COLMAP SPARSE
+    if (selection == "colmap_sparse") {
+
+        QDir imgDir(m_selectedDirectory);
+        if (imgDir.entryList(QStringList() << "*.jpg" << "*.jpeg" << "*.png",
+                             QDir::Files).isEmpty()) {
+            QMessageBox::warning(this, "Brak zdjęć",
+                                 "Wybierz folder zawierający obrazy.");
+            return;
+        }
+    }
+    // COLMAP MVS
+    else if (selection == "colmap_mvs") {
+
+        QString imagesPath    = m_selectedDirectory;
+        QString workspacePath = imagesPath + "_workspace";
+
+        if (!QDir(imagesPath).exists()) {
+            QMessageBox::warning(this, "Błąd",
+                                 "Folder ze zdjęciami nie istnieje.");
+            return;
+        }
+
+        if (!QDir(workspacePath + "/sparse/0").exists()) {
+            QMessageBox::warning(this, "Błędny workspace",
+                                 "Brak sparse/0 w:\n" + workspacePath);
+            return;
+        }
+    }
+
+    // AI
+    else if (selection.endsWith(".onnx")) {
+
+        QDir imgDir(m_selectedDirectory);
+        if (imgDir.entryList(QStringList() << "*.jpg" << "*.jpeg" << "*.png",
+                             QDir::Files).isEmpty()) {
+            QMessageBox::warning(this, "Brak zdjęć",
+                                 "Wybierz folder zawierający obrazy.");
+            return;
+        }
     }
 
     m_isRunning = true;
@@ -251,16 +314,29 @@ void MainWindow::on_pushButton_2_clicked()
     ui->progressBar->setRange(0, 0);
     ui->progressBar->show();
 
-    QString selection = ui->comboBox_4->currentData().toString();
-
-    if (selection == "colmap") {
+    if (selection == "colmap_sparse") {
         appendLog("Metoda: Fotogrametria");
         QString folderName = imgDir.dirName();
         imgDir.cdUp();
         QString outputDir = imgDir.filePath(folderName + "_workspace");
 
         emit requestReconstruction(m_selectedDirectory, outputDir);
-    } else {
+    }
+    else if (selection == "colmap_mvs") {
+        appendLog("Metoda: COLMAP MVS (dense)");
+
+        QString imagesPath    = m_selectedDirectory;
+        QString workspacePath = imagesPath + "_workspace";
+
+        QMetaObject::invokeMethod(
+            m_mvs,
+            "startMvs",
+            Qt::QueuedConnection,
+            Q_ARG(QString, imagesPath),
+            Q_ARG(QString, workspacePath)
+            );
+    }
+    else {
         appendLog("Metoda: AI (" + QFileInfo(selection).fileName() + ")");
         //emit requestAiReconstruction(m_selectedDirectory, selection);
         QString workerPath =
@@ -357,7 +433,8 @@ void MainWindow::on_actionO_programie_triggered()
 void MainWindow::refreshModelList()
 {
     ui->comboBox_4->clear();
-    ui->comboBox_4->addItem("Fotogrametria (COLMAP)", "colmap");
+    ui->comboBox_4->addItem("Fotogrametria (COLMAP)", "colmap_sparse");
+    ui->comboBox_4->addItem("COLMAP MVS (dense point cloud)", "colmap_mvs");
     QString modelsPath = QCoreApplication::applicationDirPath() + "/models";
     QDir dir(modelsPath);
     QStringList filters; filters << "*.onnx";

@@ -51,6 +51,8 @@ add_executable(ImageTo3D
     viewer.qml
     Theme.cpp
     Theme.h
+    mvs_runner.cpp
+    mvs_runner.h
     
     # --- WAŻNE: Dodajemy pliki konfiguracyjne do targetu ---
     # Dzięki temu CMake "wie", że projekt zależy od nich.
