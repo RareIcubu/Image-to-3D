@@ -59,7 +59,7 @@ void ReconstructionManager::startReconstruction(const QString &imagesPath, const
         return;
     }
 
-    // Czyszczenie
+/*    // Czyszczenie
     if (workDir.exists()) {
         qDebug() << "Wykryto stary workspace. Usuwanie...";
         if (!workDir.removeRecursively()) {
@@ -81,7 +81,7 @@ void ReconstructionManager::startReconstruction(const QString &imagesPath, const
         return;
     }
 
-    runNextStep();
+    runNextStep();*/
 }
 
 void ReconstructionManager::runNextStep() {
@@ -94,7 +94,7 @@ void ReconstructionManager::runNextStep() {
 
     m_stepTimer.restart();
 
-    QString colmapBinary = "/usr/bin/colmap";
+    QString colmapBinary = "colmap";
     QStringList colmapArgs;
 
     auto arg = [](const QString &key, const QString &val) {
@@ -122,7 +122,7 @@ void ReconstructionManager::runNextStep() {
 
         if (useNvidiaFix) {
             // FIX DLA NVIDIA: CPU + Mniejsze zdjęcia (Brak Crashy, Brak OOM)
-            colmapArgs << "--SiftExtraction.use_gpu=0";
+            colmapArgs << "--SiftExtraction.use_gpu=1";
             colmapArgs << "--SiftExtraction.max_image_size=1600"; 
         } else {
             // STANDARD (AMD/WINDOWS): Pełne GPU, pełna jakość
@@ -137,7 +137,7 @@ void ReconstructionManager::runNextStep() {
                    << arg("database_path", m_workspacePath + "/database.db");
 
         if (useNvidiaFix) {
-            colmapArgs << "--SiftMatching.use_gpu=0"; // CPU dla stabilności
+//            colmapArgs << "--SiftMatching.use_gpu=0"; // CPU dla stabilności
         } else {
             colmapArgs << "--SiftMatching.use_gpu=1"; // GPU dla szybkości
         }
@@ -149,7 +149,19 @@ void ReconstructionManager::runNextStep() {
         colmapArgs << "mapper"
                    << arg("database_path", m_workspacePath + "/database.db")
                    << arg("image_path", m_imagesPath)
-                   << arg("output_path", m_workspacePath + "/sparse");
+                   << arg("output_path", m_workspacePath + "/sparse")
+                    << "--Mapper.tri_ignore_two_view_tracks" << "0"
+
+                   // 2. ZEJDŹ DO ABSOLUTNEGO MINIMUM PUNKTÓW
+                   // Jeśli znajdzie chociaż 10 punktów, niech startuje.
+                   << "--Mapper.init_min_num_inliers" << "10"
+                   
+                   // 3. DAJ WIĘCEJ CZASU NA OBLICZENIA MATEMATYCZNE (BA)
+                   // Zwiększamy liczbę iteracji, żeby matematyka "zdążyła" się zbiec.
+                   //<< "--Mapper.ba_local_max_num_iterations" << "50"
+                   
+                   // 4. MNIEJSZY KĄT (Dla płynnych przejść wideo/turntable)
+                   << "--Mapper.init_min_tri_angle" << "4";
         break;
 
     case 3: // MODEL CONVERTER / UNDISTORTER
@@ -161,7 +173,6 @@ void ReconstructionManager::runNextStep() {
                        << arg("output_type", "PLY");
             m_currentStep = 99;
         } else {
-            emit progressUpdated("Undistorting Images...\n", 55);
             QDir(m_workspacePath + "/dense").mkpath(".");
             colmapArgs << "image_undistorter"
                        << arg("image_path", m_imagesPath)
@@ -182,10 +193,29 @@ void ReconstructionManager::runNextStep() {
 
     case 5: // FUSION
         emit progressUpdated("Fusing Point Cloud...\n", 85);
+        
+        // --- FIX NA WIELKOŚĆ LITER (JPG vs jpg) ---
+        // To jest mały hack, który kopiuje/linkuje pliki, jeśli rozszerzenia się nie zgadzają.
+        // Wykonujemy to wewnątrz C++ (Qt) przed odpaleniem procesu.
+        {
+            QDir denseImagesDir(m_workspacePath + "/dense/images");
+            QStringList files = denseImagesDir.entryList(QDir::Files);
+            for (const QString &file : files) {
+                if (file.endsWith(".jpg")) {
+                    QString upper = file; 
+                    upper.replace(".jpg", ".JPG");
+                    if (!denseImagesDir.exists(upper)) {
+                        QFile::link(denseImagesDir.filePath(file), denseImagesDir.filePath(upper));
+                    }
+                }
+            }
+        }
+        // ------------------------------------------
+
         colmapArgs << "stereo_fusion"
-                   << arg("workspace_path", m_workspacePath + "/dense")
+                   << arg("workspace_path", m_workspacePath + "/dense")                   
                    << arg("workspace_format", "COLMAP")
-                   << arg("input_type", "geometric")
+                   << arg("input_type", "photometric")
                    << arg("output_path", m_workspacePath + "/dense/fused.ply");
         break;
 

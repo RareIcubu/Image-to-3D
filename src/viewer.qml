@@ -20,7 +20,7 @@ Item {
         color: "#AA000000"
         width: 320
         height: 280 // Zwiększyłem wysokość, żeby zmieścić CheckBox
-        anchors.top: parent.top
+        anchors.bottom: parent.bottom
         anchors.left: parent.left
         anchors.margins: 10
         radius: 5
@@ -36,7 +36,6 @@ Item {
 
             Text { text: "Wymiary Oryginału: " + modelDimsString; color: "yellow"; font.pixelSize: 11 }
             Text { text: "Auto-Mnożnik: x" + transformNode.autoScaleFactor.toFixed(2); color: "orange"; font.pixelSize: 11 }
-
             Button {
                 text: "CENTRUUJ I NORMALIZUJ"
                 Layout.fillWidth: true
@@ -202,6 +201,9 @@ Item {
             speed: 5.0; shiftSpeed: 100.0
             keysEnabled: true; mouseEnabled: true
         }
+    }
+    DebugView {
+        source: view
     }
 
     property bool blockUpdates: false
