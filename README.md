@@ -102,6 +102,23 @@ docker-compose -f docker-compose.yml -f compose-windows.yml up -d --build
 
 ---
 
+## 🛠️ Rozwiązywanie problemów (Windows / WSL2)
+
+Jeśli napotkasz problemy z crashem aplikacji przy uruchamianiu rekonstrukcji (COLMAP) lub błędy CUDA:
+
+1. **Zaktualizuj sterowniki NVIDIA** na Windowsie do najnowszej wersji Studio lub Game Ready.
+2. **NVIDIA Container Toolkit**: Upewnij się, że w WSL2 masz zainstalowany toolkit:
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y nvidia-container-toolkit
+   ```
+3. **Konfiguracja VcXsrv (XLaunch)**:
+   * Jeśli okno znika przy starcie COLMAP:
+   * Odznacz opcję **Native opengl** w ustawieniach XLaunch.
+   * Upewnij się, że zaznaczone jest **Disable access control**.
+
+---
+
 ## 💻 2. Codzienny cykl pracy (Workflow)
 
 Będziesz pracować w dwóch oknach:

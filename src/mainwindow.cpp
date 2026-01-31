@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "Theme.h"
+#include "SettingsDialog.h"
 #include <QAction>
 #include "ui_mainwindow.h"
 #include "config.h"
@@ -22,21 +23,27 @@ MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
     , m_dirModel(new QFileSystemModel(this))
-    , m_manager(new ReconstructionManager())
+    , m_colmapManager(new ColmapReconstructionManager())
     , m_workerThread(new QThread(this))
-    , m_aiManager(new AIReconstructionManager())
+    , m_onnxManager(new OnnxReconstructionManager())
     , m_aiThread(new QThread(this))
     , m_scene(new QGraphicsScene(this))
     , m_pixmapItem(new QGraphicsPixmapItem())
 {
     ui->setupUi(this);
 
-    // Konfiguracja widoku 3D
     setup3DView();
 
     if (ui->menu_Widok) {
         ui->menu_Widok->addAction(ui->inputDockWidget->toggleViewAction());
         ui->menu_Widok->addAction(ui->logDockWidget->toggleViewAction());
+    }
+    
+    // Ustawienia w menu
+    m_actionSettings = new QAction("Preferencje...", this);
+    connect(m_actionSettings, &QAction::triggered, this, &MainWindow::on_actionUstawienia_triggered);
+    if (ui->menuPlik) {
+        ui->menuPlik->addAction(m_actionSettings);
     }
 
     m_dirModel->setFilter(QDir::NoDotAndDotDot | QDir::AllDirs | QDir::Files);
@@ -61,24 +68,27 @@ MainWindow::MainWindow(QWidget *parent)
     ui->textEdit->setReadOnly(true);
     appendLog("--- Gotowy do pracy ---");
 
-    m_manager->moveToThread(m_workerThread);
-    connect(this, &MainWindow::requestReconstruction, m_manager, &ReconstructionManager::startReconstruction);
-    connect(m_manager, &ReconstructionManager::progressUpdated, this, &MainWindow::onProgressUpdated);
-    connect(m_manager, &ReconstructionManager::finished, this, &MainWindow::onReconstructionFinished);
-    connect(m_manager, &ReconstructionManager::errorOccurred, this, &MainWindow::onErrorOccurred);
-    connect(m_workerThread, &QThread::finished, m_manager, &QObject::deleteLater);
+    // --- Colmap Thread ---
+    m_colmapManager->moveToThread(m_workerThread);
+    connect(this, &MainWindow::startColmap, m_colmapManager, &ColmapReconstructionManager::startReconstruction);
+    connect(this, &MainWindow::requestCancel, m_colmapManager, &ColmapReconstructionManager::cancel);
+    connect(m_colmapManager, &ColmapReconstructionManager::progressUpdated, this, &MainWindow::onProgressUpdated);
+    connect(m_colmapManager, &ColmapReconstructionManager::finished, this, &MainWindow::onReconstructionFinished);
+    connect(m_colmapManager, &ColmapReconstructionManager::errorOccurred, this, &MainWindow::onErrorOccurred);
+    connect(m_workerThread, &QThread::finished, m_colmapManager, &QObject::deleteLater);
     m_workerThread->start();
 
-    m_aiManager->moveToThread(m_aiThread);
-    connect(this, &MainWindow::requestAiReconstruction, m_aiManager, &AIReconstructionManager::startAI);
-    connect(m_aiManager, &AIReconstructionManager::progressUpdated, this, &MainWindow::onProgressUpdated);
-    connect(m_aiManager, &AIReconstructionManager::finished, this, &MainWindow::onReconstructionFinished);
-    connect(m_aiManager, &AIReconstructionManager::errorOccurred, this, &MainWindow::onErrorOccurred);
-    connect(m_aiThread, &QThread::finished, m_aiManager, &QObject::deleteLater);
+    // --- ONNX AI Thread ---
+    m_onnxManager->moveToThread(m_aiThread);
+    connect(this, &MainWindow::startOnnx, m_onnxManager, &OnnxReconstructionManager::startReconstruction);
+    connect(this, &MainWindow::requestCancel, m_onnxManager, &OnnxReconstructionManager::cancel);
+    connect(m_onnxManager, &OnnxReconstructionManager::progressUpdated, this, &MainWindow::onProgressUpdated);
+    connect(m_onnxManager, &OnnxReconstructionManager::finished, this, &MainWindow::onReconstructionFinished);
+    connect(m_onnxManager, &OnnxReconstructionManager::errorOccurred, this, &MainWindow::onErrorOccurred);
+    connect(m_aiThread, &QThread::finished, m_onnxManager, &QObject::deleteLater);
     m_aiThread->start();
 
     // === DARK MODE ===
-
     m_actionToggleTheme = new QAction(tr("Włącz tryb jasny"), this);
     m_actionToggleTheme->setCheckable(false);
     connect(m_actionToggleTheme, &QAction::triggered, this, &MainWindow::toggleTheme);
@@ -102,14 +112,10 @@ void MainWindow::setup3DView()
 {
     QQuickWidget *view = ui->view3DWidget;
     QQmlEngine *engine = view->engine();
-
-    // Importy dla środowiska Linux/Docker
     engine->addImportPath("/usr/lib/x86_64-linux-gnu/qt6/qml");
 
     view->setResizeMode(QQuickWidget::SizeRootObjectToView);
     view->setSource(QUrl::fromLocalFile("viewer.qml"));
-
-    // --- Obsługa klawiatury (WASD) ---
     view->setFocusPolicy(Qt::StrongFocus);
     view->setAttribute(Qt::WA_Hover);
     view->setFocus();
@@ -118,28 +124,19 @@ void MainWindow::setup3DView()
         for (const auto &error : view->errors()) qDebug() << error.toString();
     }
 }
-// --- DARK MODE ---
 
 void MainWindow::toggleTheme()
 {
-    // Toggle flag
     m_darkMode = !m_darkMode;
-
     if (m_darkMode) {
-        // switch to dark
         Theme::applyDarkPalette(*qobject_cast<QApplication*>(QApplication::instance()));
         if (m_actionToggleTheme) m_actionToggleTheme->setText(tr("Włącz tryb jasny"));
     } else {
-        // switch to light
         Theme::applyLightPalette(*qobject_cast<QApplication*>(QApplication::instance()));
         if (m_actionToggleTheme) m_actionToggleTheme->setText(tr("Włącz tryb ciemny"));
     }
-
-    // Force UI refresh
     qApp->processEvents();
 }
-
-// --- FUNKCJE POMOCNICZE ---
 
 void MainWindow::appendLog(const QString &message)
 {
@@ -167,7 +164,6 @@ void MainWindow::on_DirectoryButton_clicked()
     QString dirPath = QFileDialog::getExistingDirectory(this, tr("Wybierz folder"), startPath);
     if (!dirPath.isEmpty()) {
         m_selectedDirectory = dirPath;
-        ui->progressBar->show();
         ui->treeView->setRootIndex(m_dirModel->setRootPath(dirPath));
         appendLog("Wybrano folder: " + dirPath);
     }
@@ -186,8 +182,35 @@ void MainWindow::on_treeView_clicked(const QModelIndex &index)
     }
 }
 
+void MainWindow::on_actionUstawienia_triggered()
+{
+    SettingsDialog dlg(this);
+    dlg.exec();
+}
+
+void MainWindow::resetUiState()
+{
+    m_isProcessing = false;
+    ui->pushButton_2->setText("START");
+    ui->pushButton_2->setStyleSheet(""); // Domyślny styl
+    ui->progressBar->hide();
+}
+
 void MainWindow::on_pushButton_2_clicked()
 {
+    if (m_isProcessing) {
+        // --- LOGIKA STOP ---
+        if (QMessageBox::question(this, "Anuluj", "Czy na pewno chcesz przerwać przetwarzanie?", 
+            QMessageBox::Yes|QMessageBox::No) == QMessageBox::Yes) 
+        {
+            emit requestCancel();
+            appendLog("--- PRZERWANO PRZEZ UŻYTKOWNIKA ---");
+            resetUiState();
+        }
+        return;
+    }
+
+    // --- LOGIKA START ---
     if (m_selectedDirectory.isEmpty()) {
         QMessageBox::warning(this, "Błąd", "Najpierw wybierz folder ze zdjęciami!");
         return;
@@ -199,23 +222,37 @@ void MainWindow::on_pushButton_2_clicked()
         return;
     }
 
-    ui->pushButton_2->setEnabled(false);
+    // Ustaw flagę
+    m_isProcessing = true;
+    ui->pushButton_2->setText("STOP");
+    ui->pushButton_2->setStyleSheet("background-color: #d9534f; color: white; font-weight: bold;"); // Czerwony dla STOP
+
     ui->textEdit->clear();
     appendLog("--- START PROCESU ---");
     ui->progressBar->setRange(0, 0);
     ui->progressBar->show();
 
     QString selection = ui->comboBox_4->currentData().toString();
+    
+    // Sprawdź domyślny output z ustawień
+    QString defaultOutputBase = SettingsDialog::getDefaultOutputPath();
+    QString folderName = imgDir.dirName();
+    QString suffix = (selection == "colmap") ? "_workspace" : "_ai_workspace";
+    
+    // Jeśli użytkownik nie ustawił domyślnej ścieżki, używamy struktury obok folderu wejściowego (stare zachowanie)
+    // Ale SettingsDialog zwraca Documents jeśli puste, więc zawsze coś jest.
+    // Zróbmy tak: Jeśli defaultOutputBase to /app/Documents (kontener), to ok.
+    // Ale w SettingsDialog domyślnie jest DocumentsLocation.
+    
+    QString outputDir = QDir(defaultOutputBase).filePath(folderName + suffix);
 
     if (selection == "colmap") {
-        appendLog("Metoda: Fotogrametria");
-        QString folderName = imgDir.dirName();
-        imgDir.cdUp();
-        QString outputDir = imgDir.filePath(folderName + "_workspace");
-        emit requestReconstruction(m_selectedDirectory, outputDir);
+        appendLog("Metoda: Fotogrametria (COLMAP)");
+        emit startColmap(m_selectedDirectory, outputDir);
     } else {
         appendLog("Metoda: AI (" + QFileInfo(selection).fileName() + ")");
-        emit requestAiReconstruction(m_selectedDirectory, selection);
+        QMetaObject::invokeMethod(m_onnxManager, "setModelPath", Qt::QueuedConnection, Q_ARG(QString, selection));
+        emit startOnnx(m_selectedDirectory, outputDir);
     }
 }
 
@@ -229,12 +266,10 @@ void MainWindow::onProgressUpdated(QString msg, int percentage)
 
 void MainWindow::onReconstructionFinished(QString modelPath)
 {
-    ui->progressBar->hide();
-    ui->pushButton_2->setEnabled(true);
+    resetUiState();
     appendLog("--- SUKCES ---");
     QMessageBox::information(this, "Gotowe", "Model 3D został utworzony:\n" + modelPath);
 
-    // Automatyczne ładowanie wyniku
     QUrl fileUrl = QUrl::fromLocalFile(modelPath);
     QQuickItem *rootObject = ui->view3DWidget->rootObject();
     if (rootObject) {
@@ -244,10 +279,11 @@ void MainWindow::onReconstructionFinished(QString modelPath)
 
 void MainWindow::onErrorOccurred(QString message)
 {
-    ui->progressBar->hide();
-    ui->pushButton_2->setEnabled(true);
+    resetUiState();
     appendLog("!!! BŁĄD: " + message);
-    QMessageBox::critical(this, "Błąd", message);
+    if (!message.contains("anulowany")) { // Nie pokazuj popupu przy ręcznym anulowaniu
+        QMessageBox::critical(this, "Błąd", message);
+    }
 }
 
 void MainWindow::on_actionO_programie_triggered()
@@ -268,7 +304,6 @@ void MainWindow::refreshModelList()
     }
 }
 
-// --- ŁADOWANIE MODELU Z KONWERSJĄ ASSIMP ---
 void MainWindow::on_pushButton_clicked()
 {
     QString fileName = QFileDialog::getOpenFileName(this,
@@ -282,20 +317,18 @@ void MainWindow::on_pushButton_clicked()
     QFileInfo fi(fileName);
     QString ext = fi.suffix().toLower();
 
-    // Konwersja na GLB dla Qt Quick 3D
     if (ext != "glb" && ext != "gltf") {
         appendLog("Konwersja modelu " + ext + " do GLB...");
 
         QString outputDir = QDir::tempPath() + "/qt_model_conversion";
         QDir().mkpath(outputDir);
 
-        // Timestamp dla unikalności (cache busting)
         QString timestamp = QString::number(QDateTime::currentMSecsSinceEpoch());
         QString outputFile = outputDir + "/model_" + timestamp + ".glb";
 
         QProcess converter;
-        // Assimp musi być w PATH
         converter.start("assimp", QStringList() << "export" << fileName << outputFile);
+        converter.waitForFinished(); 
 
         if (converter.exitCode() != 0) {
             appendLog("Błąd konwersji: " + converter.readAllStandardError());

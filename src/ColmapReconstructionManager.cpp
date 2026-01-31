@@ -1,28 +1,28 @@
-#include "reconstructionmanager.h"
+#include "ColmapReconstructionManager.h"
+#include "SettingsDialog.h"
 #include <QDir>
 #include <QCoreApplication>
 #include <QFile>
 #include <QRegularExpression>
 #include <cstdlib>
+#include <QDebug>
 
-ReconstructionManager::ReconstructionManager(QObject *parent) : QObject(parent) {
-    m_process = nullptr;
-    m_fallbackToCpu = false;
-    m_useFastMode = true;
+ColmapReconstructionManager::ColmapReconstructionManager(QObject *parent) 
+    : IReconstructionManager(parent), m_process(nullptr) 
+{
 }
 
-void ReconstructionManager::startReconstruction(const QString &imagesPath, const QString &outputDir) {
-    // --- FIX: TEJ LINII BRAKOWAŁO ---
-    m_imagesPath = imagesPath; 
-    // --------------------------------
-    
+void ColmapReconstructionManager::startReconstruction(const QString &imagesPath, const QString &outputDir) {
+    m_imagesPath = imagesPath;
     m_workspacePath = outputDir;
-    m_currentStep = 0; // Startujemy od Undistortera (jak chciałeś)
-    m_fallbackToCpu = false;
+    m_currentStep = 0;
+    
+    // Check Settings
+    bool useMVS = SettingsDialog::isMvsEnabled();
+    m_useFastMode = !useMVS; // FastMode = Skip MVS
+    qDebug() << "COLMAP Config -> Use MVS:" << useMVS;
 
-    // 1. Sprawdzenie ścieżek
-    QDir imgDir(m_imagesPath); // Używamy m_imagesPath
-    QDir workDir(m_workspacePath);
+    QDir imgDir(m_imagesPath);    QDir workDir(m_workspacePath);
 
     if (imgDir.canonicalPath() == workDir.canonicalPath()) {
         emit errorOccurred("BŁĄD KRYTYCZNY: Folder wyjściowy nie może być ten sam co folder ze zdjęciami!");
@@ -34,12 +34,30 @@ void ReconstructionManager::startReconstruction(const QString &imagesPath, const
         return;
     }
     
-    qDebug() << "Reconstruction started using images in:" << m_imagesPath;
-    
-    // Uruchamiamy proces
+    qDebug() << "Colmap Reconstruction started using images in:" << m_imagesPath;
+    m_isCanceled = false;
     runNextStep();
 }
-void ReconstructionManager::runNextStep() {
+
+void ColmapReconstructionManager::cancel()
+{
+    m_isCanceled = true;
+    if (m_process && m_process->state() != QProcess::NotRunning) {
+        qDebug() << "Canceling COLMAP process...";
+#ifdef Q_OS_WIN
+        m_process->kill(); // Force kill on Windows
+#else
+        m_process->terminate(); // Try graceful first on Linux
+        if (!m_process->waitForFinished(1000))
+            m_process->kill();
+#endif
+    }
+    emit errorOccurred("Proces anulowany przez użytkownika.");
+}
+
+void ColmapReconstructionManager::runNextStep() {
+    if (m_isCanceled) return;
+
     m_stepTimer.restart();
 
     QString colmapBinary = "colmap";
@@ -49,82 +67,61 @@ void ReconstructionManager::runNextStep() {
         return "--" + key + "=" + val;
     };
 
-    // --- DETEKCJA ŚRODOWISKA NVIDIA (FIX) ---
     bool useNvidiaFix = false;
     const char* envVar = std::getenv("NVIDIA_DOCKER_FIX");
     if (envVar && QString(envVar) == "1") {
         useNvidiaFix = true;
         qDebug() << "[INFO] Wykryto tryb Nvidia Docker Fix: Wymuszam CPU dla SIFT i limit pamięci.";
-    } else {
-        qDebug() << "[INFO] Tryb standardowy: Pełne GPU.";
     }
-    // ----------------------------------------
 
-    // --- KONFIGURACJA KROKÓW ---
     switch (m_currentStep) {
     case 0: // FEATURE EXTRACTION
-        emit progressUpdated("Extracting Features...\n", 10);
+        emit progressUpdated("Extracting Features...", 10);
         colmapArgs << "feature_extractor"
                    << arg("database_path", m_workspacePath + "/database.db")
                    << arg("image_path", m_imagesPath);
 
         if (useNvidiaFix) {
-            // FIX DLA NVIDIA: CPU + Mniejsze zdjęcia (Brak Crashy, Brak OOM)
-            colmapArgs << "--SiftExtraction.use_gpu=1";
-            colmapArgs << "--SiftExtraction.max_image_size=1600";
-            //colmapArgs << "--FeatureExtraction.num_threads" << "4";
-
+            colmapArgs << "--SiftExtraction.use_gpu=1"
+                       << "--SiftExtraction.max_image_size=1600";
         } else {
-            // STANDARD (AMD/WINDOWS): Pełne GPU, pełna jakość
             colmapArgs << "--SiftExtraction.use_gpu=1";
-            // Domyślny rozmiar (3200) lub brak limitu
         }
         break;
 
     case 1: // FEATURE MATCHING
-        emit progressUpdated("Matching Features...\n", 25);
+        emit progressUpdated("Matching Features...", 25);
         colmapArgs << "exhaustive_matcher"
                    << arg("database_path", m_workspacePath + "/database.db");
 
-        if (useNvidiaFix) {
-            //colmapArgs << "--FeatureMatching.use_gpu=0"; // CPU dla stabilności
-        } else {
-            colmapArgs << "--SiftMatching.use_gpu=1"; // GPU dla szybkości
+        if (!useNvidiaFix) {
+            colmapArgs << "--SiftMatching.use_gpu=1";
         }
         break;
 
     case 2: // SPARSE RECONSTRUCTION
-        emit progressUpdated("Sparse Reconstruction...\n", 40);
+        emit progressUpdated("Sparse Reconstruction...", 40);
         QDir(m_workspacePath + "/sparse").mkpath(".");
         colmapArgs << "mapper"
                    << arg("database_path", m_workspacePath + "/database.db")
                    << arg("image_path", m_imagesPath)
                    << arg("output_path", m_workspacePath + "/sparse")
-                    << "--Mapper.tri_ignore_two_view_tracks" << "0"
-
-                   // 2. ZEJDŹ DO ABSOLUTNEGO MINIMUM PUNKTÓW
-                   // Jeśli znajdzie chociaż 10 punktów, niech startuje.
+                   << "--Mapper.tri_ignore_two_view_tracks" << "0"
                    << "--Mapper.init_min_num_inliers" << "10"
-                   
-                   // 3. DAJ WIĘCEJ CZASU NA OBLICZENIA MATEMATYCZNE (BA)
-                   // Zwiększamy liczbę iteracji, żeby matematyka "zdążyła" się zbiec.
-                   //<< "--Mapper.ba_local_max_num_iterations" << "50"
-                   
-                   // 4. MNIEJSZY KĄT (Dla płynnych przejść wideo/turntable)
                    << "--Mapper.init_min_tri_angle" << "4";
         break;
 
     case 3: // MODEL CONVERTER / UNDISTORTER
         if (m_useFastMode) {
-            emit progressUpdated("Exporting Point Cloud...\n", 90);
+            emit progressUpdated("Exporting Point Cloud...", 90);
             colmapArgs << "model_converter"
                        << arg("input_path", m_workspacePath + "/sparse/0")
                        << arg("output_path", m_workspacePath + "/model.ply")
                        << arg("output_type", "PLY");
             m_currentStep = 99;
-        }else {
+        } else {
+            // Unreachable in current configuration but kept for future
             QDir(m_workspacePath + "/dense").mkpath(".");
-            
             colmapArgs << "image_undistorter"
                        << arg("image_path", m_imagesPath)
                        << arg("input_path", m_workspacePath + "/sparse/0")
@@ -133,36 +130,37 @@ void ReconstructionManager::runNextStep() {
                        << arg("max_image_size", "2000");
         }
         break;
-  case 4: // DENSE STEREO
-        emit progressUpdated("Calculating Depth Maps...\n", 70);
-        
-        // Definiujemy argumenty TYLKO RAZ
+
+    case 4: // DENSE STEREO (Skipped in Fast Mode)
+        emit progressUpdated("Calculating Depth Maps...", 70);
         colmapArgs << "patch_match_stereo"
                    << arg("workspace_path", m_workspacePath + "/dense")
                    << arg("workspace_format", "COLMAP")
                    << arg("PatchMatchStereo.geom_consistency", "true");
-        break; // <--- To kończy case 4. Wszystko pod spodem usuń!
-  case 5: // FUSION
-        emit progressUpdated("Fusing Point Cloud...\n", 85);
-        
-        // --- FIX NA WIELKOŚĆ LITER (JPG vs jpg) ---
-        // To jest mały hack, który kopiuje/linkuje pliki, jeśli rozszerzenia się nie zgadzają.
-        // Wykonujemy to wewnątrz C++ (Qt) przed odpaleniem procesu.
+        break;
+
+    case 5: // FUSION (Skipped in Fast Mode)
+        emit progressUpdated("Fusing Point Cloud...", 85);
         {
+            // Case-insensitive fix for Linux filesystems
             QDir denseImagesDir(m_workspacePath + "/dense/images");
             QStringList files = denseImagesDir.entryList(QDir::Files);
             for (const QString &file : files) {
-                if (file.endsWith(".jpg")) {
-                    QString upper = file; 
-                    upper.replace(".jpg", ".JPG");
-                    if (!denseImagesDir.exists(upper)) {
-                        QFile::link(denseImagesDir.filePath(file), denseImagesDir.filePath(upper));
-                    }
+                if (file.endsWith(".jpg", Qt::CaseInsensitive)) {
+                     QString target = file;
+                     // Ensure extension is matching what COLMAP expects if needed, 
+                     // but the original code just linked .jpg to .JPG.
+                     // I'll replicate the original logic slightly cleaner.
+                     if (file.endsWith(".jpg")) {
+                         QString upper = file; 
+                         upper.replace(".jpg", ".JPG");
+                         if (!denseImagesDir.exists(upper)) {
+                             QFile::link(denseImagesDir.filePath(file), denseImagesDir.filePath(upper));
+                         }
+                     }
                 }
             }
         }
-        // ------------------------------------------
-
         colmapArgs << "stereo_fusion"
                    << arg("workspace_path", m_workspacePath + "/dense")                   
                    << arg("workspace_format", "COLMAP")
@@ -170,8 +168,8 @@ void ReconstructionManager::runNextStep() {
                    << arg("output_path", m_workspacePath + "/dense/fused.ply");
         break;
 
-    case 6: // POISSON MESHING
-        emit progressUpdated("Generating Mesh...\n", 90);
+    case 6: // POISSON MESHING (Skipped in Fast Mode)
+        emit progressUpdated("Generating Mesh...", 90);
         colmapArgs << "poisson_mesher"
                    << arg("input_path", m_workspacePath + "/dense/fused.ply")
                    << arg("output_path", m_workspacePath + "/model.ply");
@@ -190,7 +188,6 @@ void ReconstructionManager::runNextStep() {
     m_process = new QProcess(this);
     m_process->setProcessChannelMode(QProcess::MergedChannels);
 
-    // --- WRAPPER SCRIPT (Dla logów COLMAP) ---
     QString fullCommand = colmapBinary + " " + colmapArgs.join(" ");
     QString program = "/usr/bin/script";
     QStringList scriptArgs;
@@ -201,8 +198,7 @@ void ReconstructionManager::runNextStep() {
             QByteArray data = m_process->readLine();
             QString line = QString::fromLocal8Bit(data).trimmed();
             
-            // (Tutaj Twój kod parsowania paska postępu - bez zmian)
-            static QRegularExpression reProgress("\\[(\\d+)/(\\d+)\\]");
+            static QRegularExpression reProgress("\\[(\\\d+)/(\\\d+)\\]");
             QRegularExpressionMatch match = reProgress.match(line);
             int pct = -1;
             if (match.hasMatch()) {
@@ -225,9 +221,9 @@ void ReconstructionManager::runNextStep() {
     });
 
     connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-            [=](int exitCode, QProcess::ExitStatus status) {
+            [=](int exitCode, QProcess::ExitStatus) {
         if (exitCode == 0) {
-            if (m_currentStep == 99) m_currentStep = 100;
+            if (m_currentStep == 99) m_currentStep = 100; // Finish
             else m_currentStep++;
             runNextStep();
         } else {

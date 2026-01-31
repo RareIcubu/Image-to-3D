@@ -1,49 +1,52 @@
-#ifndef AI_RECONSTRUCTIONMANAGER_H
-#define AI_RECONSTRUCTIONMANAGER_H
+#ifndef ONNXRECONSTRUCTIONMANAGER_H
+#define ONNXRECONSTRUCTIONMANAGER_H
 
-#include <QObject>
+#include "IReconstructionManager.h"
 #include <QElapsedTimer>
 #include <QString>
 #include <vector>
 #include <memory>
 #include <opencv2/opencv.hpp>
 #include <onnxruntime_cxx_api.h>
+#include <atomic>
 
-class AIReconstructionManager : public QObject
+class OnnxReconstructionManager : public IReconstructionManager
 {
     Q_OBJECT
 public:
-    explicit AIReconstructionManager(QObject *parent = nullptr);
-    ~AIReconstructionManager();
+    explicit OnnxReconstructionManager(QObject *parent = nullptr);
+    ~OnnxReconstructionManager();
+
+    // Configuration
+    void setModelPath(const QString &path);
+
+    // IReconstructionManager interface
+    void startReconstruction(const QString &imagesPath, const QString &outputPath) override;
 
 public slots:
-    void startAI(const QString &imagesPath, const QString &modelPath);
-
-signals:
-    void progressUpdated(const QString &msg, int percentage);
-    void errorOccurred(const QString &msg);
-    void finished(const QString &resultPath);
+    void cancel() override;
 
 private:
     struct Point3D {
         float x, y, z;
         uint8_t r, g, b;
     };
-    enum ModelType{
+    enum ModelType {
         MiDaS,
         DPT,
         UNKNOWN
     };
+    
     bool loadModel(const QString &path);
     cv::Mat runInference(const cv::Mat &img);
     bool saveDepthAsPNG(const QString &path, const cv::Mat &depth32f);
     bool savePointCloudPLY(const QString &path, const std::vector<Point3D> &points);
     void analyzeDepthMap(const cv::Mat& depth);
-private:
+
     bool m_modelLoaded = false;
     QString m_currentModelPath;
+    QString m_targetModelPath;
     QElapsedTimer m_timer;
-
     ModelType m_modelType = UNKNOWN;
 
     std::shared_ptr<Ort::Env> m_ortEnv;
@@ -53,11 +56,11 @@ private:
     int m_inputHeight = 256;
     std::vector<const char*> m_inputNames;
     std::vector<const char*> m_outputNames;
-    // Przechowujemy stringi nazw, bo c_str() musi wskazywać na żywą pamięć
     std::vector<std::string> m_inputNameStrings;
     std::vector<std::string> m_outputNameStrings;
     
     int m_subsample = 4; 
+    std::atomic<bool> m_stopRequested{false};
 };
 
-#endif // AI_RECONSTRUCTIONMANAGER_H
+#endif // ONNXRECONSTRUCTIONMANAGER_H

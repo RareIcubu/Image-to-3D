@@ -44,10 +44,14 @@ add_executable(ImageTo3D
     mainwindow.cpp
     mainwindow.h
     mainwindow.ui
-    reconstructionmanager.cpp
-    reconstructionmanager.h
-    ai_reconstructionmanager.cpp
-    ai_reconstructionmanager.h
+    IReconstructionManager.h
+    ColmapReconstructionManager.cpp
+    ColmapReconstructionManager.h
+    OnnxReconstructionManager.cpp
+    OnnxReconstructionManager.h
+    SettingsDialog.cpp
+    SettingsDialog.h
+    SettingsDialog.ui
     viewer.qml
     Theme.cpp
     Theme.h
