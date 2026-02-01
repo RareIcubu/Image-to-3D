@@ -2,6 +2,7 @@
 #include <iostream>
 #include "mainwindow.h"
 #include "Theme.h"
+#include "PointCloudGeometry.h"
 
 // Dołączamy nasz plik konfiguracyjny z wersją
 #include "config.h"
@@ -19,6 +20,9 @@ int main(int argc, char *argv[])
     std::cout << "Uruchamiam ImageTo3D w wersji: " << PROJECT_VERSION << std::endl;
 
     QApplication app(argc, argv);
+    
+    // REJESTRACJA TYPÓW QML
+    qmlRegisterType<PointCloudGeometry>("ImageTo3D", 1, 0, "PointCloudGeometry");
 
     // 3. Dublujemy to w instancji aplikacji dla pewności
     app.addLibraryPath("/usr/lib/x86_64-linux-gnu/qt6/plugins");

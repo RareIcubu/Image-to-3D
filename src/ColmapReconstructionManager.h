@@ -27,6 +27,14 @@ private:
     bool m_useGpu;
     bool m_useFastMode = true; 
     bool m_isCanceled = false;
+
+    // Parametry jakości
+    int m_maxImageSize = 2000;
+    int m_minInliers = 15;
+    int m_numThreads = -1;
+    int m_maxFeatures = 8192;
+    bool m_useGeomConsistency = true;
+    QString m_outputFormat = "PLY";
 };
 
 #endif // COLMAPRECONSTRUCTIONMANAGER_H

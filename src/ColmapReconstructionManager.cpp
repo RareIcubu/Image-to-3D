@@ -1,5 +1,6 @@
 #include "ColmapReconstructionManager.h"
 #include "SettingsDialog.h"
+#include "SystemChecks.h"
 #include <QDir>
 #include <QCoreApplication>
 #include <QFile>
@@ -18,23 +19,33 @@ void ColmapReconstructionManager::startReconstruction(const QString &imagesPath,
     m_currentStep = 0;
     
     // --- KONFIGURACJA SPRZĘTOWA ---
-    // Pobieramy ustawienia. Jeśli SettingsDialog nie ma tej metody, 
-    // zmień 'useGpu' na 'false' na sztywno dla Twojego laptopa.
-    // W idealnym świecie dodasz checkbox w SettingsDialog.
+    // Pobieramy ustawienia BEZPOŚREDNIO z konfiguracji użytkownika
     bool useMVS = SettingsDialog::isMvsEnabled();
+    QString quality = SettingsDialog::getQuality(); // Tylko do logów
     
-    // TODO: Dodaj metodę SettingsDialog::isGpuEnabled() w przyszłości.
-    // Na razie bezpiecznik: Jeśli nie ma Nvidii, dajemy false.
-    m_useGpu = false; 
+    // Automatyczna detekcja sprzętu
+    m_useGpu = SystemChecks::checkCudaAvailable();
 
-    // Opcjonalnie: Prosta autodetekcja (jeśli chcesz automatyki)
-    if (QFile::exists("/proc/driver/nvidia/version")) {
-         m_useGpu = true;
-    }
-
-    m_useFastMode = !useMVS; 
-
+    // Parametry zdefiniowane przez użytkownika
+    m_maxImageSize = SettingsDialog::getMaxImageSize();
+    m_numThreads = SettingsDialog::getNumThreads();
+    m_maxFeatures = SettingsDialog::getMaxFeatures();
+    m_useGeomConsistency = SettingsDialog::isGeomConsistencyEnabled();
+    m_outputFormat = SettingsDialog::getOutputFormat();
+    
+    // Fallback dla minInliers zależny od jakości (to można zostawić jako automatykę, bo mało wpływa na crash)
+    m_minInliers = 15;
+    if (quality == "Low") m_minInliers = 10;
+    
     qDebug() << "=== START REKONSTRUKCJI ===";
+    qDebug() << "Jakość (Profil):" << quality;
+    qDebug() << "Max Image Size:" << m_maxImageSize;
+    qDebug() << "Max Features:" << m_maxFeatures;
+    qDebug() << "Wątki CPU:" << m_numThreads;
+    qDebug() << "Geom Consistency:" << m_useGeomConsistency;
+    qDebug() << "Format Wyjściowy:" << m_outputFormat;
+    
+    m_useFastMode = !useMVS;
     qDebug() << "Tryb MVS (Gęsta chmura):" << useMVS;
     qDebug() << "Akceleracja GPU:" << m_useGpu;
 
@@ -93,12 +104,16 @@ void ColmapReconstructionManager::runNextStep() {
         args << "feature_extractor"
              << arg("database_path", m_workspacePath + "/database.db")
              << arg("image_path", m_imagesPath)
-             << arg("SiftExtraction.use_gpu", useGpuStr);
+             << arg("SiftExtraction.use_gpu", useGpuStr)
+             << arg("SiftExtraction.max_image_size", QString::number(m_maxImageSize))
+             << arg("SiftExtraction.max_num_features", QString::number(m_maxFeatures));
+             
+        if (m_numThreads > 0) {
+             args << arg("SiftExtraction.num_threads", QString::number(m_numThreads));
+        }
         
-        // Optymalizacja dla CPU: domain_size_pooling oszczędza pamięć i czas
         if (!m_useGpu) {
-             args << arg("SiftExtraction.domain_size_pooling", "1");
-             args << arg("SiftExtraction.estimate_affine_shape", "0"); // Szybciej na CPU
+             args << arg("SiftExtraction.domain_size_pooling", "1"); // To zawsze warto mieć na CPU
         }
         break;
 
@@ -107,6 +122,10 @@ void ColmapReconstructionManager::runNextStep() {
         args << "exhaustive_matcher"
              << arg("database_path", m_workspacePath + "/database.db")
              << arg("SiftMatching.use_gpu", useGpuStr);
+             
+        if (m_numThreads > 0) {
+             args << arg("SiftMatching.num_threads", QString::number(m_numThreads));
+        }
         break;
 
     case 2: // SPARSE RECONSTRUCTION (MAPPER)
@@ -116,20 +135,24 @@ void ColmapReconstructionManager::runNextStep() {
              << arg("database_path", m_workspacePath + "/database.db")
              << arg("image_path", m_imagesPath)
              << arg("output_path", m_workspacePath + "/sparse")
-             // Domyślne parametry dla lepszej stabilności
+             // Parametry "Robust" z Twojej wersji (lepsze dla turntable/wideo)
              << arg("Mapper.tri_ignore_two_view_tracks", "0")
-             << arg("Mapper.init_min_num_inliers", "15");
+             << arg("Mapper.init_min_num_inliers", "10") // Tolerancyjny start
+             << arg("Mapper.init_min_tri_angle", "4");   // Lepsze dla małych kątów
         break;
 
     case 3: // CONVERTER / UNDISTORTER
         if (m_useFastMode) {
-            // Szybki export rzadkiej chmury
+            // Szybki export rzadkiej chmury - ZAWSZE PLY jako baza
             emit progressUpdated("Eksport chmury punktów...", 90);
             args << "model_converter"
                  << arg("input_path", m_workspacePath + "/sparse/0")
                  << arg("output_path", m_workspacePath + "/model.ply")
                  << arg("output_type", "PLY");
-            m_currentStep = 99; // Skok do końca
+            
+            // Po zakończeniu tego kroku skoczymy do kroku 7 (Konwersja)
+            // Zamiast 99 (Koniec)
+            m_currentStep = 6; // Następny inkrement da 7
         } else {
             // Przygotowanie pod MVS (Dense)
             emit progressUpdated("Przygotowanie do MVS...", 55);
@@ -139,7 +162,7 @@ void ColmapReconstructionManager::runNextStep() {
                  << arg("input_path", m_workspacePath + "/sparse/0")
                  << arg("output_path", m_workspacePath + "/dense")
                  << arg("output_type", "COLMAP")
-                 << arg("max_image_size", "2000");
+                 << arg("max_image_size", QString::number(m_maxImageSize));
         }
         break;
 
@@ -148,7 +171,7 @@ void ColmapReconstructionManager::runNextStep() {
         args << "patch_match_stereo"
              << arg("workspace_path", m_workspacePath + "/dense")
              << arg("workspace_format", "COLMAP")
-             << arg("PatchMatchStereo.geom_consistency", "true");
+             << arg("PatchMatchStereo.geom_consistency", m_useGeomConsistency ? "true" : "false");
         
         // Jeśli CPU, wyłączamy indeks GPU (COLMAP 3.8+ wspiera CPU dense, ale jest wolne)
         if (!m_useGpu) {
@@ -171,14 +194,43 @@ void ColmapReconstructionManager::runNextStep() {
              << arg("input_path", m_workspacePath + "/dense/fused.ply")
              << arg("output_path", m_workspacePath + "/model.ply");
         break;
+        
+    case 7: // FINAL CONVERSION (Optional)
+        // Jeśli użytkownik chciał OBJ a my mamy PLY (z Poisson Mesher), konwertujemy Assimpem
+        if (!m_useFastMode && m_outputFormat == "OBJ") {
+             emit progressUpdated("Konwersja do OBJ...", 95);
+             QString inputFile = m_workspacePath + "/model.ply";
+             QString outputFile = m_workspacePath + "/model.obj";
+             
+             // Używamy QProcess do odpalenia assimp
+             // Uwaga: "assimp" musi być w PATH (jest w Dockerze)
+             if (m_process) m_process->deleteLater();
+             m_process = new QProcess(this);
+             m_process->start("assimp", QStringList() << "export" << inputFile << outputFile);
+             
+             connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
+                [=](int exitCode, QProcess::ExitStatus) {
+                if (exitCode == 0 && QFile::exists(outputFile)) {
+                    emit finished(outputFile);
+                } else {
+                    // Fallback to PLY
+                    emit finished(inputFile);
+                }
+             });
+             return; // Ważne: wychodzimy, bo asynchroniczny process
+        } else {
+             // Jeśli nie trzeba konwertować, kończymy
+             QString finalModel = m_workspacePath + "/model.ply";
+             if (m_useFastMode) finalModel = m_workspacePath + "/model." + m_outputFormat.toLower(); // Już zrobione w kroku 3
+             
+             if (QFile::exists(finalModel)) emit finished(finalModel);
+             else emit errorOccurred("Nie znaleziono pliku wynikowego.");
+             return;
+        }
+        break;
 
     default:
-        // KONIEC
-        if (QFile::exists(m_workspacePath + "/model.ply")) {
-            emit finished(m_workspacePath + "/model.ply");
-        } else {
-            emit errorOccurred("Proces zakończony, ale nie znaleziono pliku wynikowego model.ply");
-        }
+        // KONIEC (Fallback dla switcha)
         return;
     }
 

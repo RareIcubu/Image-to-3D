@@ -15,69 +15,292 @@
   </property>
   <layout class="QVBoxLayout" name="verticalLayout">
    <item>
-    <widget class="QGroupBox" name="groupBox">
-     <property name="title">
-      <string>Ścieżki</string>
+    <widget class="QTabWidget" name="tabWidget">
+     <property name="currentIndex">
+      <number>0</number>
      </property>
-     <layout class="QHBoxLayout" name="horizontalLayout">
-      <item>
-       <widget class="QLabel" name="label">
-        <property name="text">
-         <string>Domyślny folder zapisu:</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QLineEdit" name="lineEditPath"/>
-      </item>
-      <item>
-       <widget class="QPushButton" name="btnSelectPath">
-        <property name="text">
-         <string>...</string>
-        </property>
-       </widget>
-      </item>
-     </layout>
+     
+     <!-- TAB 1: OGÓLNE -->
+     <widget class="QWidget" name="tab_general">
+      <attribute name="title">
+       <string>Ogólne</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="verticalLayout_tab1">
+       <item>
+        <widget class="QGroupBox" name="groupBox">
+         <property name="title">
+          <string>Ścieżki i Status</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_paths">
+          <item>
+           <layout class="QHBoxLayout" name="horizontalLayout">
+            <item>
+             <widget class="QLabel" name="label">
+              <property name="text">
+               <string>Domyślny folder zapisu:</string>
+              </property>
+             </widget>
+            </item>
+            <item>
+             <widget class="QLineEdit" name="lineEditPath"/>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btnSelectPath">
+              <property name="text">
+               <string>...</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+          <item>
+           <widget class="QLabel" name="lblGpuStatus">
+            <property name="text">
+             <string>Sprawdzanie GPU...</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="groupBox_presets">
+         <property name="title">
+          <string>Szybkie ustawienia</string>
+         </property>
+         <layout class="QHBoxLayout" name="horizontalLayout_quality">
+          <item>
+           <widget class="QLabel" name="label_quality">
+            <property name="text">
+             <string>Jakość rekonstrukcji (Preset):</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QComboBox" name="comboQuality">
+            <item>
+             <property name="text">
+              <string>Niska (Szybka)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Średnia (Domyślna)</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>Wysoka (Szczegółowa)</string>
+             </property>
+            </item>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <spacer name="verticalSpacer_1">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
+
+     <!-- TAB 2: ZAAWANSOWANE (COLMAP) -->
+     <widget class="QWidget" name="tab_advanced">
+      <attribute name="title">
+       <string>Zaawansowane (COLMAP)</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="verticalLayout_tab2">
+       <item>
+        <widget class="QGroupBox" name="groupBox_features">
+         <property name="title">
+          <string>Ekstrakcja Cech (Feature Extraction)</string>
+         </property>
+         <layout class="QGridLayout" name="gridLayout_feat">
+          <item row="0" column="0">
+           <widget class="QLabel" name="label_imgsize">
+            <property name="text">
+             <string>Max rozmiar zdjęcia (px):</string>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QSpinBox" name="spinMaxImageSize">
+            <property name="minimum">
+             <number>0</number>
+            </property>
+            <property name="maximum">
+             <number>10000</number>
+            </property>
+            <property name="value">
+             <number>2000</number>
+            </property>
+            <property name="singleStep">
+             <number>100</number>
+            </property>
+            <property name="toolTip">
+             <string>Mniejszy rozmiar = Mniej RAMu (Unika błędu OOM Code 9)</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="label_threads">
+            <property name="text">
+             <string>Liczba wątków CPU (-1 = Auto):</string>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QSpinBox" name="spinThreads">
+            <property name="minimum">
+             <number>-1</number>
+            </property>
+            <property name="maximum">
+             <number>64</number>
+            </property>
+            <property name="value">
+             <number>-1</number>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="0">
+           <widget class="QLabel" name="label_features">
+            <property name="text">
+             <string>Max liczba cech:</string>
+            </property>
+           </widget>
+          </item>
+          <item row="2" column="1">
+           <widget class="QSpinBox" name="spinMaxFeatures">
+            <property name="minimum">
+             <number>0</number>
+            </property>
+            <property name="maximum">
+             <number>30000</number>
+            </property>
+            <property name="value">
+             <number>8192</number>
+            </property>
+            <property name="singleStep">
+             <number>1024</number>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <widget class="QGroupBox" name="groupBox_dense">
+         <property name="title">
+          <string>Gęsta Rekonstrukcja (Dense Stereo)</string>
+         </property>
+         <layout class="QVBoxLayout" name="verticalLayout_dense">
+          <item>
+           <widget class="QCheckBox" name="chkEnableMVS">
+            <property name="text">
+             <string>Włącz MVS (Dense Stereo)</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="chkGeomConsistency">
+            <property name="text">
+             <string>Spójność Geometryczna (Geom Consistency)</string>
+            </property>
+            <property name="checked">
+             <bool>true</bool>
+            </property>
+            <property name="toolTip">
+             <string>Wyłącz, aby przyspieszyć (kosztem jakości szumów).</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <spacer name="verticalSpacer_2">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
+
+     <!-- TAB 3: WYJŚCIE -->
+     <widget class="QWidget" name="tab_output">
+      <attribute name="title">
+       <string>Wyjście</string>
+      </attribute>
+      <layout class="QVBoxLayout" name="verticalLayout_tab3">
+       <item>
+        <widget class="QGroupBox" name="groupBox_output">
+         <property name="title">
+          <string>Formaty Plików</string>
+         </property>
+         <layout class="QHBoxLayout" name="horizontalLayout_fmt">
+          <item>
+           <widget class="QLabel" name="label_format">
+            <property name="text">
+             <string>Format modelu 3D:</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QComboBox" name="comboOutputFormat">
+            <item>
+             <property name="text">
+              <string>PLY (Cloud/Mesh)</string>
+             </property>
+             <property name="data">
+              <string>PLY</string>
+             </property>
+            </item>
+            <item>
+             <property name="text">
+              <string>OBJ (Mesh)</string>
+             </property>
+             <property name="data">
+              <string>OBJ</string>
+             </property>
+            </item>
+           </widget>
+          </item>
+         </layout>
+        </widget>
+       </item>
+       <item>
+        <spacer name="verticalSpacer_3">
+         <property name="orientation">
+          <enum>Qt::Vertical</enum>
+         </property>
+         <property name="sizeHint" stdset="0">
+          <size>
+           <width>20</width>
+           <height>40</height>
+          </size>
+         </property>
+        </spacer>
+       </item>
+      </layout>
+     </widget>
     </widget>
-   </item>
-   <item>
-    <widget class="QGroupBox" name="groupBox_2">
-     <property name="title">
-      <string>Konfiguracja COLMAP</string>
-     </property>
-     <layout class="QVBoxLayout" name="verticalLayout_2">
-      <item>
-       <widget class="QLabel" name="lblGpuStatus">
-        <property name="text">
-         <string>Sprawdzanie GPU...</string>
-        </property>
-       </widget>
-      </item>
-      <item>
-       <widget class="QCheckBox" name="chkEnableMVS">
-        <property name="text">
-         <string>Włącz gęstą rekonstrukcję (MVS)</string>
-        </property>
-        <property name="toolTip">
-         <string>Wymaga karty graficznej NVIDIA. Generuje gęstą chmurę punktów i mesh.</string>
-        </property>
-       </widget>
-      </item>
-     </layout>
-    </widget>
-   </item>
-   <item>
-    <spacer name="verticalSpacer">
-     <property name="orientation">
-      <enum>Qt::Vertical</enum>
-     </property>
-     <property name="sizeHint" stdset="0">
-      <size>
-       <width>20</width>
-       <height>40</height>
-      </size>
-     </property>
-    </spacer>
    </item>
    <item>
     <widget class="QDialogButtonBox" name="buttonBox">

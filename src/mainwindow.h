@@ -41,6 +41,7 @@ private slots:
     void on_treeView_clicked(const QModelIndex &index);
     void on_actionO_programie_triggered();
     void on_actionUstawienia_triggered(); // Settings slot
+    void on_actionOpenModel_triggered();  // New manual load slot
     void refreshModelList(); 
     void on_pushButton_2_clicked(); // START/STOP button
 
@@ -50,13 +51,14 @@ private slots:
     void onErrorOccurred(QString message);
 
     void appendLog(const QString &message);
-    void on_pushButton_clicked(); // Load 3D model manually
+    // REMOVED: void on_pushButton_clicked(); 
 
     void toggleTheme();
 
 private:
     Ui::MainWindow *ui;
     void setup3DView();
+    void updateStatusLabel(); // Helper to update config label
     
     void resetUiState(); // Helper to reset button state
 

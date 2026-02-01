@@ -88,145 +88,52 @@
      <item>
       <widget class="QGroupBox" name="groupBox">
        <property name="title">
-        <string>Ustawienia Procesu</string>
+        <string>Konfiguracja</string>
        </property>
-       <layout class="QGridLayout" name="gridLayout_7">
-        <item row="1" column="0">
-         <widget class="QLabel" name="label_5">
-          <property name="font">
-           <font>
-            <pointsize>12</pointsize>
-           </font>
-          </property>
-          <property name="text">
-           <string>Jakość</string>
-          </property>
-         </widget>
+       <layout class="QVBoxLayout" name="verticalLayout_config">
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_method">
+          <item>
+           <widget class="QLabel" name="label_7">
+            <property name="font">
+             <font>
+              <pointsize>12</pointsize>
+             </font>
+            </property>
+            <property name="text">
+             <string>Metoda:</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QComboBox" name="comboBox_4">
+            <item>
+             <property name="text">
+              <string>Fotogrametria (COLMAP)</string>
+             </property>
+             <property name="data">
+               <string>colmap</string>
+             </property>
+            </item>
+            <!-- Modele AI będą dodawane dynamicznie w kodzie -->
+           </widget>
+          </item>
+         </layout>
         </item>
-        <item row="2" column="1">
-         <widget class="QSlider" name="horizontalSlider_3">
-          <property name="minimum">
-           <number>1</number>
-          </property>
-          <property name="maximum">
-           <number>5</number>
-          </property>
+        <item>
+         <widget class="Line" name="line">
           <property name="orientation">
-           <enum>Qt::Orientation::Horizontal</enum>
+           <enum>Qt::Horizontal</enum>
           </property>
          </widget>
         </item>
-        <item row="2" column="0">
-         <widget class="QLabel" name="label_6">
-          <property name="font">
-           <font>
-            <pointsize>12</pointsize>
-           </font>
-          </property>
+        <item>
+         <widget class="QLabel" name="lblCurrentSettings">
           <property name="text">
-           <string>Poziom szczegółówości</string>
+           <string>Status: Gotowy (Ustawienia w menu Plik)</string>
           </property>
-         </widget>
-        </item>
-        <item row="1" column="1">
-         <widget class="QComboBox" name="comboBox_3">
-          <item>
-           <property name="text">
-            <string>Niska</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>Średnia</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>Wysoka</string>
-           </property>
-          </item>
-         </widget>
-        </item>
-        <item row="0" column="0">
-         <widget class="QLabel" name="label_7">
-          <property name="font">
-           <font>
-            <pointsize>12</pointsize>
-           </font>
-          </property>
-          <property name="text">
-           <string>Metoda konwersji</string>
-          </property>
-         </widget>
-        </item>
-        <item row="0" column="1">
-         <widget class="QComboBox" name="comboBox_4">
-          <item>
-           <property name="text">
-            <string>Fotogrametria</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>AI (MiDaS)</string>
-           </property>
-          </item>
-         </widget>
-        </item>
-        <item row="3" column="0" colspan="2">
-         <widget class="QCheckBox" name="checkBox">
-          <property name="font">
-           <font>
-            <pointsize>12</pointsize>
-           </font>
-          </property>
-          <property name="text">
-           <string>Włącz teksturowanie</string>
-          </property>
-         </widget>
-        </item>
-       </layout>
-      </widget>
-     </item>
-     <item>
-      <widget class="QGroupBox" name="groupBox_2">
-       <property name="title">
-        <string>Ustawienia Wyjściowe</string>
-       </property>
-       <layout class="QGridLayout" name="gridLayout_8">
-        <item row="0" column="0">
-         <widget class="QLabel" name="label_8">
-          <property name="font">
-           <font>
-            <pointsize>12</pointsize>
-           </font>
-          </property>
-          <property name="text">
-           <string>Format wyjściowy</string>
-          </property>
-         </widget>
-        </item>
-        <item row="0" column="1">
-         <widget class="QComboBox" name="comboBox_5">
-          <item>
-           <property name="text">
-            <string>OBJ</string>
-           </property>
-          </item>
-          <item>
-           <property name="text">
-            <string>STL</string>
-           </property>
-          </item>
-         </widget>
-        </item>
-        <item row="1" column="0">
-         <widget class="QLineEdit" name="lineEdit"/>
-        </item>
-        <item row="1" column="1">
-         <widget class="QPushButton" name="pushButton">
-          <property name="text">
-           <string>Przeglądaj...</string>
+          <property name="styleSheet">
+           <string>color: gray; font-style: italic;</string>
           </property>
          </widget>
         </item>

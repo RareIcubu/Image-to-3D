@@ -97,6 +97,13 @@ MainWindow::MainWindow(QWidget *parent)
         ui->menu_Widok->addSeparator();
         ui->menu_Widok->addAction(m_actionToggleTheme);
     }
+    
+    // Dodanie akcji "Otwórz Model" do menu Plik (zastępuje usunięty przycisk)
+    QAction *actionOpen = new QAction("Otwórz model 3D...", this);
+    connect(actionOpen, &QAction::triggered, this, &MainWindow::on_actionOpenModel_triggered);
+    if (ui->menuPlik) ui->menuPlik->insertAction(m_actionSettings, actionOpen);
+
+    updateStatusLabel();
 }
 
 MainWindow::~MainWindow()
@@ -106,6 +113,20 @@ MainWindow::~MainWindow()
     m_aiThread->quit();
     m_aiThread->wait();
     delete ui;
+}
+
+void MainWindow::updateStatusLabel()
+{
+    QString quality = SettingsDialog::getQuality();
+    bool gpu = SettingsDialog::isGpuAvailable();
+    bool mvs = SettingsDialog::isMvsEnabled();
+    
+    QString status = QString("Jakość: <b>%1</b> | GPU: <b>%2</b> | MVS: <b>%3</b>")
+                     .arg(quality)
+                     .arg(gpu ? "<span style='color:lightgreen'>Aktywne</span>" : "<span style='color:orange'>Brak (CPU)</span>")
+                     .arg(mvs ? "Tak" : "Nie");
+    
+    ui->lblCurrentSettings->setText(status);
 }
 
 void MainWindow::setup3DView()
@@ -173,9 +194,23 @@ void MainWindow::onModelLoaded() { ui->progressBar->hide(); }
 
 void MainWindow::on_treeView_clicked(const QModelIndex &index)
 {
-    if (m_dirModel->isDir(index)) return;
-    QString filePath = m_dirModel->filePath(index);
-    QPixmap pixmap(filePath);
+    QString path = m_dirModel->filePath(index);
+
+    if (m_dirModel->isDir(index)) {
+        // Nowa logika: Kliknięcie folderu wybiera go jako wejście
+        m_selectedDirectory = path;
+        appendLog("Wybrano folder źródłowy: " + path);
+        
+        // Opcjonalnie: Zliczamy zdjęcia, żeby dać feedback
+        QDir dir(path);
+        QStringList filters; filters << "*.jpg" << "*.jpeg" << "*.png";
+        int count = dir.entryList(filters, QDir::Files).count();
+        statusBar()->showMessage(QString("Znaleziono %1 zdjęć w: %2").arg(count).arg(dir.dirName()), 3000);
+        return;
+    }
+
+    // Stara logika: Podgląd pliku
+    QPixmap pixmap(path);
     if (!pixmap.isNull()) {
         m_pixmapItem->setPixmap(pixmap);
         ui->graphicsView_3->fitInView(m_pixmapItem, Qt::KeepAspectRatio);
@@ -185,7 +220,9 @@ void MainWindow::on_treeView_clicked(const QModelIndex &index)
 void MainWindow::on_actionUstawienia_triggered()
 {
     SettingsDialog dlg(this);
-    dlg.exec();
+    if (dlg.exec() == QDialog::Accepted) {
+        updateStatusLabel(); // Odśwież status po zmianie ustawień
+    }
 }
 
 void MainWindow::resetUiState()
@@ -248,6 +285,8 @@ void MainWindow::on_pushButton_2_clicked()
 
     if (selection == "colmap") {
         appendLog("Metoda: Fotogrametria (COLMAP)");
+        updateStatusLabel(); // Log current config too
+        appendLog("Konfiguracja: " + ui->lblCurrentSettings->text().remove(QRegularExpression("<[^>]*>"))); // Remove HTML tags for log
         emit startColmap(m_selectedDirectory, outputDir);
     } else {
         appendLog("Metoda: AI (" + QFileInfo(selection).fileName() + ")");
@@ -270,10 +309,16 @@ void MainWindow::onReconstructionFinished(QString modelPath)
     appendLog("--- SUKCES ---");
     QMessageBox::information(this, "Gotowe", "Model 3D został utworzony:\n" + modelPath);
 
+    // PLY ładujemy bezpośrednio (przez PointCloudGeometry), inne natywnie lub przez Assimp (w on_actionOpen...)
+    // Tutaj zakładamy, że modelPath jest PLY lub OBJ (z rekonstrukcji).
+    
     QUrl fileUrl = QUrl::fromLocalFile(modelPath);
     QQuickItem *rootObject = ui->view3DWidget->rootObject();
     if (rootObject) {
+         appendLog("Wywołuję loadModel w QML: " + fileUrl.toString());
          QMetaObject::invokeMethod(rootObject, "loadModel", Q_ARG(QVariant, fileUrl.toString()));
+    } else {
+         appendLog("Błąd: rootObject QML jest null!");
     }
 }
 
@@ -304,7 +349,7 @@ void MainWindow::refreshModelList()
     }
 }
 
-void MainWindow::on_pushButton_clicked()
+void MainWindow::on_actionOpenModel_triggered()
 {
     QString fileName = QFileDialog::getOpenFileName(this,
                                                     tr("Open 3D Model"),
@@ -317,26 +362,26 @@ void MainWindow::on_pushButton_clicked()
     QFileInfo fi(fileName);
     QString ext = fi.suffix().toLower();
 
-    if (ext != "glb" && ext != "gltf") {
-        appendLog("Konwersja modelu " + ext + " do GLB...");
-
+    // Jeśli to format, którego QtQuick3D nie obsługuje (np. FBX, DAE, 3DS), próbujemy Assimpem.
+    // PLY obsługujemy natywnie przez PointCloudGeometry (fake mesh).
+    // GLB, GLTF, OBJ, STL są natywne.
+    if (ext != "ply" && ext != "glb" && ext != "gltf" && ext != "obj" && ext != "stl") {
+        appendLog("Konwersja modelu " + ext + " do GLB (dla podglądu)...");
+        
         QString outputDir = QDir::tempPath() + "/qt_model_conversion";
         QDir().mkpath(outputDir);
-
         QString timestamp = QString::number(QDateTime::currentMSecsSinceEpoch());
         QString outputFile = outputDir + "/model_" + timestamp + ".glb";
 
         QProcess converter;
-        converter.start("assimp", QStringList() << "export" << fileName << outputFile);
+        converter.start("assimp", QStringList() << "export" << fileName << outputFile << "glb2");
         converter.waitForFinished(); 
 
-        if (converter.exitCode() != 0) {
-            appendLog("Błąd konwersji: " + converter.readAllStandardError());
+        if (converter.exitCode() == 0 && QFile::exists(outputFile)) {
+             finalPath = outputFile;
+             appendLog("Skonwertowano pomyślnie.");
         } else {
-            if (QFile::exists(outputFile)) {
-                finalPath = outputFile;
-                appendLog("Konwersja udana: " + finalPath);
-            }
+             appendLog("Błąd konwersji (assimp). Kod: " + QString::number(converter.exitCode()));
         }
     }
 
@@ -345,6 +390,9 @@ void MainWindow::on_pushButton_clicked()
 
     if (rootObject) {
         ui->view3DWidget->setFocus();
+        appendLog("Ręczne ładowanie: " + fileUrl.toString());
         QMetaObject::invokeMethod(rootObject, "loadModel", Q_ARG(QVariant, fileUrl.toString()));
+    } else {
+        appendLog("Błąd: rootObject QML jest null przy ręcznym otwieraniu!");
     }
 }

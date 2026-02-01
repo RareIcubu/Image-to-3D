@@ -55,6 +55,8 @@ add_executable(ImageTo3D
     Theme.h
     SystemChecks.cpp
     SystemChecks.h
+    PointCloudGeometry.cpp
+    PointCloudGeometry.h
     version.txt
     config.h.in
 )
@@ -75,3 +77,5 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/viewer.qml"
     COPYONLY
 )
+
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/shaders" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")

@@ -20,10 +20,20 @@ public:
     static QString getDefaultOutputPath();
     static bool isMvsEnabled();
     static bool isGpuAvailable();
+    static QString getQuality(); // "Low", "Medium", "High"
+    
+    // Zaawansowane
+    static int getNumThreads();
+    static int getMaxImageSize();
+    static int getMaxFeatures();
+    
+    static bool isGeomConsistencyEnabled();
+    static QString getOutputFormat();
 
 private slots:
     void on_btnSelectPath_clicked();
     void on_buttonBox_accepted();
+    void on_comboQuality_currentIndexChanged(int index); // Preset logic
     void checkGpuAvailability();
 
 private:

@@ -7,6 +7,7 @@ services:
       args:
         USER_ID: ${UID:-1000}
         GROUP_ID: ${GID:-1000}
+        PARALLEL_JOBS: ${PARALLEL_JOBS:-2}
     container_name: imageto3d_dev
     image: imageto3d-dev
     volumes:
@@ -15,14 +16,36 @@ services:
     environment:
       - DISPLAY=${DISPLAY}
       # NVIDIA_VISIBLE_DEVICES i DRIVER_CAPABILITIES są potrzebne dla obrazów nvidia/cuda
+      # Jeśli system nie ma GPU, te zmienne zostaną zignorowane przez runtime (zazwyczaj)
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=all
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
+      # FIX: Zapobiega crashom Qt w Dockerze (Shared Memory)
+      - QT_X11_NO_MITSHM=1
+    # --- FIX: Usuwamy sztywne rezerwacje GPU. 
+    # Dzięki temu kontener wstanie na CPU, a aplikacja sama wykryje brak GPU w SystemChecks.
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
     tty: true
     stdin_open: true
+
+  prod:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: final
+    container_name: imageto3d_prod
+    image: imageto3d-prod
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # No source volume mount for prod
+    environment:
+      - DISPLAY=${DISPLAY}
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - QT_X11_NO_MITSHM=1
+    tty: true

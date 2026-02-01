@@ -4,14 +4,16 @@ import QtQuick.Layouts
 import QtQuick3D
 import QtQuick3D.Helpers
 import QtQuick3D.AssetUtils
+import ImageTo3D 1.0
 
 Item {
     id: root
     anchors.fill: parent
 
     // --- LOGIKA NAPRAWY MODELI ---
-    // False = Kostka (Normalny), True = AI (Odwrócony)
     property bool fixBackFace: false 
+    property string currentSource: ""
+    property bool isPly: currentSource.toString().toLowerCase().endsWith(".ply")
 
     // --- LEWY HUD: INFO ---
     Rectangle {
@@ -152,12 +154,12 @@ Item {
             backgroundMode: SceneEnvironment.Color
             antialiasingMode: SceneEnvironment.MSAA
             antialiasingQuality: SceneEnvironment.High
-            depthPrePassEnabled: true
+            depthPrePassEnabled: false 
         }
 
         PerspectiveCamera { id: camera; z: 200; y: 100; clipNear: 1.0; clipFar: 100000.0 }
         
-        DirectionalLight { eulerRotation.x: -45; eulerRotation.y: -45; brightness: 1.5; castsShadow: true }
+        DirectionalLight { eulerRotation.x: -45; eulerRotation.y: -45; brightness: 1.5; castsShadow: false }
         DirectionalLight { eulerRotation.x: 45; eulerRotation.y: 45; brightness: 1.2; color: "#FFDEAD" }
         PointLight { position: camera.position; brightness: 2.0; color: "white" }
 
@@ -169,9 +171,6 @@ Item {
             
             property real autoScaleFactor: 1.0
 
-            // --- TU JEST MAGIA ---
-            // Jeśli fixBackFace (CheckBox) jest TRUE -> mnożymy Z przez -1.
-            // Jeśli FALSE (Kostka) -> mnożymy przez 1.
             scale: Qt.vector3d(
                 autoScaleFactor * scaleSlider.value, 
                 autoScaleFactor * scaleSlider.value, 
@@ -181,17 +180,43 @@ Item {
             position: Qt.vector3d(posX.value, posY.value, posZ.value)
             eulerRotation: Qt.vector3d(rotX.value, rotY.value, rotZ.value)
 
+            // 1. Loader dla formatów standardowych (GLB, OBJ, STL)
             RuntimeLoader {
                 id: loader
-                source: ""
+                source: !root.isPly ? root.currentSource : ""
                 instancing: null
-                
-                // USUNĄŁEM hardcodowane scale (-1). Teraz steruje tym nadrzędny Node.
+                visible: !root.isPly
                 
                 onStatusChanged: {
-                    if (status === RuntimeLoader.Ready) {
-                        if (!blockUpdates) calculateAutoFit();
+                    if (status === RuntimeLoader.Ready && !root.isPly) {
+                        if (!blockUpdates) calculateAutoFit(loader.bounds);
                     }
+                }
+            }
+
+            // 2. Loader dla PLY (Native Points -> Fake Triangles)
+            Model {
+                id: plyModel
+                visible: root.isPly
+                geometry: PointCloudGeometry {
+                    id: pcGeo
+                    source: root.isPly ? root.currentSource : ""
+                }
+                
+                materials: PrincipledMaterial {
+                    lighting: PrincipledMaterial.NoLighting
+                    cullMode: PrincipledMaterial.NoCulling
+                    baseColor: "white"
+                    pointSize: 4.0 // Make points visible
+                }
+                
+                castsShadows: false
+                receivesShadows: false
+                pickable: false
+                
+                onBoundsChanged: {
+                     console.log("BOUNDS CHANGED: " + bounds.minimum + " -> " + bounds.maximum);
+                     if (root.isPly && !blockUpdates) calculateAutoFit(bounds);
                 }
             }
         }
@@ -208,19 +233,33 @@ Item {
 
     property bool blockUpdates: false
 
-    function calculateAutoFit() {
-        var bMin = loader.bounds.minimum;
-        var bMax = loader.bounds.maximum;
+    function calculateAutoFit(bounds) {
+        if (!bounds) {
+            console.log("QML: calculateAutoFit called with null bounds");
+            return;
+        }
+
+        var bMin = bounds.minimum;
+        var bMax = bounds.maximum;
+        console.log("QML: calculateAutoFit. Min:" + bMin + " Max:" + bMax);
+
         var sizeVec = bMax.minus(bMin);
         var maxDim = Math.max(sizeVec.x, Math.max(sizeVec.y, sizeVec.z));
+        
+        console.log("QML: Model size: " + sizeVec + " MaxDim: " + maxDim);
 
-        modelDimsString = sizeVec.x.toFixed(5) + " x " + sizeVec.y.toFixed(5);
-
-        if (maxDim <= 0.000001) return; 
+        if (maxDim <= 0.000001) {
+            console.log("QML: MaxDim too small, aborting fit.");
+            return; 
+        }
 
         // 1. Centrowanie
         var center = bMin.plus(bMax).times(0.5);
-        loader.position = center.times(-1);
+        // loader.position = center.times(-1); // To działa tylko dla loadera, musimy przesunąć geometrię lub node
+        // Najlepiej przesunąć Node, ale Node jest nadrzędny. 
+        // Zrobimy offset wewnątrz geometrii? Nie, ustawmy position RuntimeLoadera/Modelu
+        if (!root.isPly) loader.position = center.times(-1);
+        else plyModel.position = center.times(-1);
 
         // 2. Normalizacja do 1000 jednostek
         var targetSize = 1000.0;
@@ -243,10 +282,22 @@ Item {
     }
 
     function loadModel(path) {
+        console.log("QML: loadModel called with: " + path);
         blockUpdates = false;
-        loader.source = "";
-        loader.source = path;
+        currentSource = path;
+        console.log("QML: currentSource set. isPly: " + isPly);
         view.forceActiveFocus();
+        
+        // Force update if needed
+        if (isPly && plyModel.bounds) {
+             console.log("QML: Checking existing bounds: " + plyModel.bounds.minimum);
+             // Manually trigger fit if bounds are already valid and non-zero size
+             // Note: bounds might be default if not yet loaded, but we check just in case
+             if (plyModel.bounds.maximum.x !== plyModel.bounds.minimum.x) {
+                  console.log("QML: Triggering manual fit (bounds exist)");
+                  calculateAutoFit(plyModel.bounds);
+             }
+        }
     }
     
     MouseArea {
