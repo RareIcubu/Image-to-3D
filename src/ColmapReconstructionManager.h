@@ -24,6 +24,7 @@ private:
     QString m_imagesPath;
     int m_currentStep = 0;
     QProcess *m_process;
+    bool m_useGpu;
     bool m_useFastMode = true; 
     bool m_isCanceled = false;
 };

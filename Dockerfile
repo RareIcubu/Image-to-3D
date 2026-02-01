@@ -1,63 +1,80 @@
-# --- STAGE 1: COLMAP BUILDER (CUDA Support) ---
-# Używamy oficjalnego obrazu NVIDIA, żeby mieć kompilator NVCC i biblioteki CUDA
+# ==========================================
+# STAGE 1: COLMAP BUILDER (CUDA Support)
+# ==========================================
 FROM nvidia/cuda:11.8.0-devel-ubuntu22.04 AS colmap_builder
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV TZ=Europe/Warsaw
 
-# Instalacja zależności do budowania COLMAP
-# Budujemy wersję CLI (bez GUI), więc nie potrzebujemy Qt5 w tym etapie
+# 1. Instalacja zależności COLMAP
+# Fixes: libeigen3-dev, libflann-dev, liblz4-dev, libsqlite3-dev, libcgal-dev
 RUN apt-get update && apt-get install -y \
-    cmake build-essential git \
+    cmake build-essential git curl unzip ninja-build \
     libboost-program-options-dev libboost-filesystem-dev libboost-graph-dev \
     libboost-system-dev libboost-test-dev libboost-serialization-dev \
-    libeigen-dev libfreeimage-dev libgoogle-glog-dev libgflags-dev \
+    libeigen3-dev libfreeimage-dev libgoogle-glog-dev libgflags-dev \
     libglew-dev libmetis-dev libceres-dev \
-    ninja-build curl unzip \
+    libflann-dev liblz4-dev libsqlite3-dev libcgal-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /build
 
-# Pobieramy COLMAP w wersji 3.9.1 (Stabilna, sprawdzona z CUDA)
-# Flagy kluczowe:
-# - GUI_ENABLED=OFF: Eliminuje zależności X11 i Qt5 (brak konfliktów z naszym Qt6)
-# - CUDA_ENABLED=ON: Włącza akcelerację GPU
+# 2. Budowanie COLMAP 3.9.1
+# Fixes: CMAKE_CUDA_ARCHITECTURES="60...86" (dla CMake 3.22)
 RUN git clone --branch 3.9.1 --depth 1 https://github.com/colmap/colmap.git . && \
     mkdir build && cd build && \
     cmake .. -GNinja \
-        -DCMAKE_BUILD_TYPE=Release \
-        -DGUI_ENABLED=OFF \
-        -DCUDA_ENABLED=ON \
-        -DCUDA_ARCHS="all" \
-    && ninja && ninja install
+    -DCMAKE_BUILD_TYPE=Release \
+    -DGUI_ENABLED=OFF \
+    -DCUDA_ENABLED=ON \
+    -DCMAKE_CUDA_ARCHITECTURES="60;61;70;75;80;86" \
+    && ninja -j 4 && ninja install
 
-# --- STAGE 2: QT6 BASE ---
-FROM nvidia/cuda:11.8.0-runtime-ubuntu22.04 AS base
+# ==========================================
+# STAGE 2: QT6 BASE (Environment Setup)
+# ==========================================
+FROM nvidia/cuda:11.8.0-devel-ubuntu22.04 AS base
 
-ENV TZ=Europe/Warsaw
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ >/etc/timezone
+ENV DEBIAN_FRONTEND=noninteractive
 
-# Instalujemy Runtime dependencies dla COLMAP i nasze Qt6
-RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    build-essential cmake ninja-build git pkg-config \
-    # Colmap Runtime Deps
-    libboost-program-options1.74.0 libboost-filesystem1.74.0 libboost-graph1.74.0 \
-    libboost-system1.74.0 libboost-serialization1.74.0 \
-    libfreeimage3 libgoogle-glog0v5 libgflags2.2 libglew2.2 libmetis5 libceres2 \
-    # Qt6 i narzędzia
-    qt6-base-dev qt6-base-private-dev qt6-tools-dev qt6-tools-dev-tools \
-    libqt6core5compat6-dev qt6-declarative-dev qt6-quick3d-dev \
-    libqt6opengl6-dev libqt6shadertools6-dev qt6-quick3d-dev-tools \
-    qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtquick-controls \
-    qml6-module-qtquick-layouts qml6-module-qtqml-workerscript qml6-module-qtquick-templates \
-    libqt6quicktemplates2-6 \
-    # Assimp & OpenCV & ONNX
-    assimp-utils libassimp-dev libopencv-dev wget \
-    # Systemowe
-    x11-apps libx11-dev libgl1-mesa-dev libvulkan-dev vulkan-tools \
+# 1. Instalacja zależności systemowych i Qt
+# Fixes: p7zip-full, wget, opencv-dev, xkb/vulkan, xcb-cursor0
+RUN apt-get update && apt-get install -y \
+    build-essential cmake ninja-build git python3-pip \
+    libgl1-mesa-dev libxkbcommon-x11-0 libpulse-dev libdbus-1-3 \
+    libxcb1 libxcb-glx0 libxcb-keysyms1 libxcb-image0 libxcb-shm0 \
+    libxcb-icccm4 libxcb-sync1 libxcb-xfixes0 libxcb-shape0 libxcb-randr0 \
+    libxcb-render-util0 libxcb-util1 libxcb-xinerama0 libxcb-xinput0 \
+    libx11-xcb-dev libxrender-dev libxi-dev \
+    # Runtime & Build fixes:
+    libxkbcommon-dev libvulkan-dev libopencv-dev libxcb-cursor0 \
+    p7zip-full wget \
+    # Colmap Runtime Deps (dla buildera):
+    libboost-program-options-dev libboost-filesystem-dev libboost-graph-dev \
+    libboost-system-dev libboost-test-dev libgoogle-glog-dev libgflags-dev \
+    libfreeimage-dev libatlas-base-dev libsuitesparse-dev liblz4-dev libmetis-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Instalacja ONNX Runtime (CPU/GPU compat)
+RUN pip3 install aqtinstall
+
+# 2. Instalacja Qt 6.6.0 via aqtinstall
+# WAŻNE: Dodano 'qtquicktimeline' do listy modułów!
+# To naprawia błąd: (libQt6QuickTimeline.so.6: cannot open shared object file)
+ARG QT_VERSION=6.6.0
+RUN aqt install-qt linux desktop ${QT_VERSION} gcc_64 -O /opt/qt --external 7z \
+    -m qt5compat qtimageformats qt3d qtquick3d qtshadertools qtquicktimeline
+
+RUN chmod -R 755 /opt/qt
+
+# 3. Zmienne środowiskowe Qt
+ENV PATH="/opt/qt/${QT_VERSION}/gcc_64/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/opt/qt/${QT_VERSION}/gcc_64/lib:${LD_LIBRARY_PATH}"
+ENV Qt6_DIR="/opt/qt/${QT_VERSION}/gcc_64/lib/cmake/Qt6"
+ENV QT_PLUGIN_PATH="/opt/qt/${QT_VERSION}/gcc_64/plugins"
+ENV QML_IMPORT_PATH="/opt/qt/${QT_VERSION}/gcc_64/qml"
+ENV QML2_IMPORT_PATH="/opt/qt/${QT_VERSION}/gcc_64/qml"
+
+# 4. Instalacja ONNX Runtime
 WORKDIR /tmp
 RUN wget -q https://github.com/microsoft/onnxruntime/releases/download/v1.17.1/onnxruntime-linux-x64-1.17.1.tgz \
     && tar -xf onnxruntime-linux-x64-1.17.1.tgz \
@@ -66,10 +83,8 @@ RUN wget -q https://github.com/microsoft/onnxruntime/releases/download/v1.17.1/o
     && rm -rf onnxruntime* \
     && ldconfig
 
-# Kopiujemy skompilowany COLMAP z pierwszego etapu
+# Kopiowanie binarki COLMAP
 COPY --from=colmap_builder /usr/local/bin/colmap /usr/local/bin/colmap
-# (Opcjonalnie) Kopiujemy biblioteki jeśli COLMAP zbudował jakieś statyczne/współdzielone niestandardowe
-# Ale przy apt-get install libceres-dev w obu etapach powinno działać.
 
 ARG USER_ID
 ARG GROUP_ID
@@ -80,49 +95,65 @@ USER devuser
 WORKDIR /app
 CMD ["sleep", "infinity"]
 
-# --- STAGE 3: BUILDER (Nasza aplikacja) ---
+# ==========================================
+# STAGE 3: BUILDER (Project Compilation)
+# ==========================================
 FROM base AS builder
 COPY --chown=devuser:devgroup src/ /app/src/
 WORKDIR /app/src/
 RUN rm -rf build && mkdir build && cd build && \
     cmake .. -GNinja -DCMAKE_BUILD_TYPE=Release && ninja
 
-# --- STAGE 4: FINAL (Prod) ---
+# ==========================================
+# STAGE 4: FINAL (Production Image)
+# ==========================================
 FROM nvidia/cuda:11.8.0-runtime-ubuntu22.04 AS final
 
 ENV TZ=Europe/Warsaw
 RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ >/etc/timezone
 
+# Instalacja bibliotek runtime
 RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-    # Minimal Qt6 libs
-    libqt6widgets6 libqt6gui6 libqt6core6 libqt6core5compat6 \
-    qml6-module-qtquick qml6-module-qtquick-window qml6-module-qtquick-controls \
-    qml6-module-qtquick-layouts qml6-module-qtqml-workerscript qml6-module-qtquick-templates \
-    libqt6quicktemplates2-6 \
-    libqt6quick3d6 libqt6quick3dhelpers6 libqt6quick3dassetimport6 \
-    libqt6quick3dparticleeffects6 libqt6quick3druntimerender6 \
-    libqt6opengl6 libqt6shadertools6 qt6-quick3d-assetimporters-plugin \
-    # Colmap Deps
+    libgl1-mesa-dev libxkbcommon-x11-0 libpulse0 libdbus-1-3 \
+    libxcb1 libxcb-glx0 libxcb-keysyms1 libxcb-image0 libxcb-shm0 \
+    libxcb-icccm4 libxcb-sync1 libxcb-xfixes0 libxcb-shape0 libxcb-randr0 \
+    libxcb-render-util0 libxcb-util1 libxcb-xinerama0 libxcb-xinput0 \
+    libx11-xcb1 libxrender1 libxi6 libfontconfig1 \
+    libxcb-cursor0 \
+    # Colmap base deps
     libboost-program-options1.74.0 libboost-filesystem1.74.0 libboost-graph1.74.0 \
     libboost-system1.74.0 libboost-serialization1.74.0 \
-    libfreeimage3 libgoogle-glog0v5 libgflags2.2 libglew2.2 libmetis5 libceres2 \
-    # Inne
-    libassimp-dev libvulkan1 libopencv-dev x11-apps libx11-6 libgl1 \
+    libgoogle-glog0v5 libgflags2.2 libglew2.2 libmetis5 \
+    libatlas3-base \
+    # --- ZMIANA: Zamiast kombinować, instalujemy wersję DEV dla Ceres ---
+    libceres-dev \
+    # --------------------------------------------------------------------
+    # App deps
+    libassimp5 libvulkan1 libopencv-core4.5d libopencv-imgcodecs4.5d \
     && rm -rf /var/lib/apt/lists/*
 
-# Kopiujemy COLMAP
-COPY --from=colmap_builder /usr/local/bin/colmap /usr/local/bin/colmap
+# --- USUNĄŁEM RĘCZNE KOPIOWANIE LIBCERES (apt install libceres-dev to załatwił) ---
+COPY --from=colmap_builder /usr/lib/x86_64-linux-gnu/libfreeimage.so* /usr/lib/x86_64-linux-gnu/
+COPY --from=colmap_builder /usr/lib/x86_64-linux-gnu/libflann.so* /usr/lib/x86_64-linux-gnu/
+COPY --from=colmap_builder /usr/lib/x86_64-linux-gnu/liblz4.so* /usr/lib/x86_64-linux-gnu/# --------------------------------------------
 
-# Kopiujemy ONNX
+# Kopiowanie Qt
+COPY --from=base /opt/qt /opt/qt
+
+# Zmienne środowiskowe Runtime
+ENV QT_VERSION=6.6.0
+ENV PATH="/opt/qt/${QT_VERSION}/gcc_64/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/opt/qt/${QT_VERSION}/gcc_64/lib:${LD_LIBRARY_PATH}"
+ENV QT_PLUGIN_PATH="/opt/qt/${QT_VERSION}/gcc_64/plugins"
+ENV QML_IMPORT_PATH="/opt/qt/${QT_VERSION}/gcc_64/qml"
+ENV QML2_IMPORT_PATH="/opt/qt/${QT_VERSION}/gcc_64/qml"
+
+# Kopiowanie binarek
+COPY --from=colmap_builder /usr/local/bin/colmap /usr/local/bin/colmap
 COPY --from=base /usr/local/lib/libonnxruntime.so* /usr/local/lib/
 RUN ldconfig
 
-# Kopiujemy QML
-COPY --from=builder /usr/lib/x86_64-linux-gnu/qt6/qml /usr/lib/x86_64-linux-gnu/qt6/qml
-COPY --from=builder /usr/lib/x86_64-linux-gnu/qt6/plugins /usr/lib/x86_64-linux-gnu/qt6/plugins
-
-ENV QML_IMPORT_PATH=/usr/lib/x86_64-linux-gnu/qt6/qml
-ENV QT_PLUGIN_PATH=/usr/lib/x86_64-linux-gnu/qt6/plugins
+# Ustawienia platformy
 ENV QT_QPA_PLATFORM=xcb
 ENV XDG_RUNTIME_DIR=/tmp/runtime-app
 
@@ -131,7 +162,8 @@ RUN useradd -ms /bin/bash appuser
 USER appuser
 WORKDIR /home/appuser
 
+# Kopiowanie aplikacji
 COPY --from=builder /app/src/build/ImageTo3D .
-COPY src/models ./models
+COPY src/models ./models 
 
 CMD ["./ImageTo3D"]
