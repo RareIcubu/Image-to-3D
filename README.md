@@ -1,307 +1,175 @@
----
+# 📸 ImageTo3D: Konwerter Obrazu 2D do 3D
 
-# 📸 Projekt: Konwerter Obrazu 2D do 3D
+> **Projekt na przedmiot: Grafika i Komunikacja Człowiek-Komputer**
 
-Repozytorium projektu na przedmiot **Grafika i GUI**.
-Aplikacja desktopowa w **C++/Qt6**, korzystająca z **Docker** do stworzenia spójnego środowiska deweloperskiego.
-
----
-
-## 📑 Spis treści
-
-1. [🚀 Stos technologiczny](#-stos-technologiczny)
-2. [🛠️ Jak zacząć pracę (Środowisko deweloperskie)](#️-1-jak-zacząć-pracę-środowisko-deweloperskie)
-
-   * [Wymagania wstępne](#wymagania-wstępne)
-   * [Konfiguracja wyświetlania GUI](#-konfiguracja-wyświetlania-gui-krytyczne)
-   * [Uruchomienie środowiska](#-uruchomienie-środowiska)
-3. [💻 Codzienny cykl pracy (Workflow)](#-2-codzienny-cykl-pracy-workflow)
-
-   * [Praca z Qt Creator + Docker](#-praca-z-qt-creator--docker)
-   * [Pierwsze uruchomienie](#-pierwsze-uruchomienie-kompilacja)
-   * [Zatrzymywanie pracy](#-zatrzymywanie-pracy)
-4. [📦 Wersjonowanie i wydania (Releases)](#-3-wersjonowanie-i-wydania-releases)
-5. [📁 Struktura projektu](#-4-struktura-projektu)
-6. [🎓 Jak uruchomić gotową aplikację (Dla prowadzącego)](#-5-jak-uruchomić-gotową-aplikację-dla-prowadzącego)
+Zaawansowana aplikacja desktopowa w **C++/Qt6**, umożliwiająca rekonstrukcję modeli 3D ze zdjęć przy użyciu dwóch metod: klasycznej fotogrametrii oraz sztucznej inteligencji. Całość zamknięta w kontenerze **Docker** dla zapewnienia powtarzalności środowiska.
 
 ---
 
-## 🚀 Stos technologiczny
+## ✨ Główne funkcjonalności
 
-| Komponent                | Technologia                            |
-| ------------------------ | -------------------------------------- |
-| **Język**                | C++ (C++17 / C++20)                    |
-| **GUI**                  | Qt 6                                   |
-| **Przetwarzanie obrazu** | OpenCV                                 |
-| **Budowanie**            | CMake + Ninja                          |
-| **Środowisko**           | Docker + Docker Compose (Ubuntu 22.04) |
-| **Kontrola wersji**      | Git + GitHub                           |
+1.  **Metoda Hybrydowa:**
+    * 🏛️ **Fotogrametria (COLMAP):** Rekonstrukcja wysokiej jakości z serii zdjęć (Structure-from-Motion + Multi-View Stereo). Wykorzystuje akcelerację CUDA.
+    * 🧠 **AI (ONNX Runtime):** Szybka estymacja głębi z pojedynczego zdjęcia (MiDaS) i konwersja do modelu 3D.
+2.  **Generowanie Siatki (Meshing):**
+    * Automatyczna konwersja chmury punktów do siatki trójkątów (Poisson Reconstruction) przy użyciu **Open3D**.
+    * Inteligentne mapowanie kolorów z chmury punktów na wierzchołki modelu.
+3.  **Wbudowany Viewer 3D (Qt Quick 3D):**
+    * Obsługa formatów `.ply`, `.obj`, `.glb`.
+    * **Auto-Fit:** Inteligentne skalowanie i centrowanie modelu niezależnie od jego rozmiaru.
+    * Podgląd hybrydowy (Siatka / Chmura punktów).
+    * Dynamiczna zmiana oświetlenia i edycja transformacji (Skala/Obrót/Pozycja).
+
+---
+
+## 🛠️ Stos technologiczny
+
+| Kategoria | Technologia | Rola w projekcie |
+| :--- | :--- | :--- |
+| **Core** | **C++17** | Główny język logiki aplikacji. |
+| **GUI** | **Qt 6.7 (QML)** | Nowoczesny interfejs użytkownika i rendering 3D. |
+| **Fotogrametria** | **COLMAP (CUDA)** | Ekstrakcja cech, dopasowywanie i gęsta rekonstrukcja. |
+| **AI / ML** | **ONNX Runtime** | Uruchamianie modelu MiDaS (Depth Estimation). |
+| **Przetwarzanie 3D** | **Open3D 0.17** | Przetwarzanie chmur punktów, generowanie meshy. |
+| **Obraz** | **OpenCV 4.5** | Manipulacja obrazami i mapami głębi. |
+| **Build System** | **CMake + Ninja** | Szybka kompilacja wielowątkowa. |
+| **Środowisko** | **Docker** | Izolacja zależności (Ubuntu 22.04 + Nvidia Drivers). |
 
 ---
 
-## 🛠️ 1. Jak zacząć pracę (Środowisko deweloperskie)
-
-Kontener **dev** zawiera wszystkie potrzebne zależności (C++, Qt, OpenCV, CMake).
-Kod edytujesz lokalnie, a kompilacja odbywa się **wewnątrz kontenera**.
-
----
+## 🚀 Jak zacząć (Instalacja)
 
 ### Wymagania wstępne
 
-* **Git** — pobranie repozytorium
-* **Docker** i **Docker Compose** (Linux) lub **Docker Desktop** (Windows/macOS)
-* **Konfiguracja wyświetlania GUI** (patrz niżej)
+1.  **System:** Linux (zalecane) lub Windows (WSL2).
+2.  **GPU:** Karta graficzna NVIDIA + zainstalowane sterowniki na hoście.
+3.  **Docker:** Zainstalowany Docker Engine.
+4.  **NVIDIA Container Toolkit:**
+    * Kluczowe dla działania COLMAP na GPU wewnątrz kontenera.
+    * Test poprawności instalacji: `docker run --rm --gpus all nvidia/cuda:11.8.0-base-ubuntu22.04 nvidia-smi`
+
+### Konfiguracja wyświetlania okien (X11)
+
+Kontener musi mieć dostęp do serwera X11 hosta, aby wyświetlić GUI.
+
+* **Linux:**
+    Zazwyczaj działa automatycznie dzięki mapowaniu `/tmp/.X11-unix`.
+    W razie problemów z uprawnieniami:
+    ```bash
+    xhost +local:docker
+    ```
+
+* **Windows (WSL2):**
+    1. Zainstaluj **VcXsrv**.
+    2. Uruchom **XLaunch** z ustawieniami:
+        * ✅ Multiple windows
+        * ✅ Disable access control (Krytyczne!)
+        * ❌ Native opengl (Odznacz, jeśli okno znika)
 
 ---
 
-### 🖥️ Konfiguracja wyświetlania GUI (krytyczne)
+## 💻 Cykl pracy (Development)
 
-Kontener to system **Linux**, ale musi wyświetlać okna na Twoim komputerze.
+Projekt wykorzystuje `docker compose` do zarządzania środowiskiem deweloperskim.
 
-#### 🔹 Windows
-
-1. Pobierz i zainstaluj [**VcXsrv**](https://sourceforge.net/projects/vcxsrv/).
-2. Uruchom **XLaunch**:
-
-   * *Multiple windows*
-   * *Start no client*
-   * W zakładce *Extra settings* → zaznacz **Disable access control**
-3. Po uruchomieniu ikona VcXsrv powinna być widoczna w zasobniku systemowym.
-
-#### 🔹 Linux (Docker Desktop)
-
-Jeśli przy starcie pojawia się błąd:
-
-```
-mounts denied: /tmp/.X11-unix
-```
-
-dodaj ścieżkę ręcznie:
-
-1. Otwórz **Docker Desktop → Settings → Resources → File Sharing**
-2. Kliknij `+` i dodaj `/tmp/.X11-unix`
-3. Kliknij **Apply & Restart**
-
----
-
-### 🚀 Uruchomienie środowiska
-
-W terminalu w folderze głównym projektu:
-
-#### Linux
+### 1. Uruchomienie kontenera
+Ta komenda zbuduje obraz (z bibliotekami Open3D, Qt, Colmap) i uruchomi kontener w tle.
 
 ```bash
-docker-compose -f docker-compose.yml -f compose-linux.yml up -d --build
-```
 
-#### Windows (z działającym VcXsrv)
+### 2. Wejście do środowiska
 
 ```bash
-docker-compose -f docker-compose.yml -f compose-windows.yml up -d --build
+docker compose exec dev bash
 ```
 
----
+### 3. Kompilacja i Uruchomienie
 
-## 🛠️ Rozwiązywanie problemów (Windows / WSL2)
-
-Jeśli napotkasz problemy z crashem aplikacji przy uruchamianiu rekonstrukcji (COLMAP) lub błędy CUDA:
-
-1. **Zaktualizuj sterowniki NVIDIA** na Windowsie do najnowszej wersji Studio lub Game Ready.
-2. **NVIDIA Container Toolkit**: Upewnij się, że w WSL2 masz zainstalowany toolkit:
-   ```bash
-   sudo apt-get update
-   sudo apt-get install -y nvidia-container-toolkit
-   ```
-3. **Konfiguracja VcXsrv (XLaunch)**:
-   * Jeśli okno znika przy starcie COLMAP:
-   * Odznacz opcję **Native opengl** w ustawieniach XLaunch.
-   * Upewnij się, że zaznaczone jest **Disable access control**.
-
----
-
-## 💻 2. Codzienny cykl pracy (Workflow)
-
-Będziesz pracować w dwóch oknach:
-
-1. **Edytor kodu** — np. VS Code, Qt Creator lub CLion (folder `src/`)
-2. **Terminal** — połączony z kontenerem:
-
-   ```bash
-   docker-compose exec dev bash
-   ```
-
----
-
-### 🖥️ Praca z Qt Creator + Docker
-
-Qt Creator działa jako **edytor**, a kompilacja i uruchamianie odbywają się **w kontenerze**.
-
-#### Qt Creator
-
-1. Uruchom lokalnie.
-2. Otwórz projekt: `Plik → Otwórz Projekt → src/CMakeLists.txt`
-3. Zignoruj błędy dotyczące „Kit” – nie będą używane.
-
-#### Terminal (kompilacja)
-
-1. Po zapisaniu zmian w Qt Creatorze:
-
-   ```bash
-   cd /app/src/build
-   ninja
-   ./TwojaAplikacja
-   ```
-2. Aplikacja otworzy się na Twoim pulpicie.
-
----
-
-### 🧱 Pierwsze uruchomienie (kompilacja)
+Wewnątrz kontenera:
 
 ```bash
-# Wejdź do kontenera
-docker-compose exec dev bash
+# Przejdź do folderu budowania
+cd src/build
 
-# Przejdź do katalogu źródłowego
-cd /app/src
-
-# Stwórz folder build
-mkdir build && cd build
-
-# Konfiguracja CMake
+# Skonfiguruj i zbuduj (używamy Ninja dla szybkości)
 cmake .. -GNinja
-
-# Kompilacja
 ninja
+
+# Uruchom aplikację
+./ImageTo3D
 ```
 
 ---
 
-### 📴 Zatrzymywanie pracy
+## 📖 Instrukcja Obsługi
 
-Po zakończeniu sesji:
+### Tryb 1: Fotogrametria (COLMAP)
 
-```bash
-docker-compose down
-```
+Dla najlepszej jakości. Wymaga serii zdjęć obiektu dookoła (min. 5-10).
 
----
+1. W drzewie plików po lewej zaznacz **Folder** ze zdjęciami.
+2. Wybierz metodę: **Fotogrametria (COLMAP)**.
+3. Kliknij **START**.
+4. Aplikacja automatycznie wykona: Feature Extraction -> Matching -> Sparse Reconstruction -> Dense Stereo -> Meshing.
 
-## 📦 3. Wersjonowanie i wydania (Releases)
+### Tryb 2: AI (Single Image)
 
-Tworzenie wydania składa się z trzech kroków:
+Dla szybkiego podglądu z jednego zdjęcia.
 
-1. 🔧 Zmiana wersji w kodzie
-2. 🐳 Budowa i publikacja obrazu Docker
-3. 🏷️ Tagowanie i release na GitHubie
+1. W drzewie plików rozwiń folder i zaznacz **pojedyncze zdjęcie** (lub kilka z wciśniętym `Ctrl` dla przetwarzania wsadowego).
+2. Wybierz model AI (np. `midas_v21.onnx`).
+3. Kliknij **START**.
+4. Aplikacja wygeneruje mapę głębi, przekształci ją w chmurę punktów i nałoży teksturę.
 
----
+### Nawigacja w Viewerze
 
-### 🔹 Krok 1: Zmiana wersji
-
-W pliku `src/CMakeLists.txt`:
-
-```cmake
-project(TwojaAplikacja VERSION 1.1.0 ...)
-```
-
-Zatwierdź:
-
-```bash
-git commit -am "Bump version to 1.1.0"
-git push
-```
+* **LPM + Mysz:** Obracanie kamery (Orbit).
+* **PPM + Mysz:** Przesuwanie kamery (Pan).
+* **Scroll:** Przybliżanie (Zoom).
+* **Prawy Panel:** Suwaki do ręcznej korekty rotacji/skali/pozycji (X/Y/Z).
+* **Przycisk "Centruj i Normalizuj":** Automatycznie dopasowuje mikroskopijne lub gigantyczne modele do widoku kamery.
 
 ---
 
-### 🔹 Krok 2: Budowa i publikacja obrazu Docker
+## 🔧 Rozwiązywanie problemów
 
-```bash
-docker build -t moj-obraz-prod --target final .
-docker login
-docker tag moj-obraz-prod twojanazwa/image-to-3d:1.1.0
-docker push twojanazwa/image-to-3d:1.1.0
+### 🔴 `docker: Error response from daemon: could not select device driver "nvidia"`
+
+Docker nie widzi Twojej karty graficznej lub toolkita.
+
+1. Zainstaluj `nvidia-container-toolkit`.
+2. Upewnij się, że w `/etc/docker/daemon.json` jest sekcja `runtimes`:
+```json
+{
+    "data-root": "/home/docker-data",
+    "default-runtime": "runc",
+    "runtimes": {
+        "nvidia": {
+            "path": "nvidia-container-runtime",
+            "runtimeArgs": []
+        }
+    }
+}
 ```
+
+
+3. `sudo systemctl restart docker`
+
+### 🔴 `No space left on device` podczas budowania
+
+Obrazy Docker z CUDA i bibliotekami C++ są duże (>10GB tymczasowo).
+
+1. Wyczyść cache: `docker system prune -a --volumes`.
+2. Jeśli masz mało miejsca na partycji root (`/`), przenieś dane Dockera na inną partycję (edycja `data-root` w `daemon.json`).
+
+### 🔴 COLMAP Crash (Kod 6 / SIGABRT)
+
+Zazwyczaj oznacza brak pamięci VRAM na karcie graficznej przy ustawieniach "High".
+
+* **Rozwiązanie:** W menu *Plik -> Preferencje* zmień jakość rekonstrukcji na **Medium**.
 
 ---
 
-### 🔹 Krok 3: Tag i Release na GitHubie
-
-```bash
-git tag v1.1.0
-git push origin v1.1.0
-```
-
-Na GitHubie:
-
-1. Otwórz **Releases → Draft a new release**
-2. Wybierz tag `v1.1.0`
-3. W opisie dodaj instrukcję uruchamiania (sekcja 5)
-
----
-
-## 📁 4. Struktura projektu
-
-```
-.
-├── .git/
-├── .gitignore                # Ignoruje m.in. src/build/
-├── Dockerfile                # Multi-stage build (dev + prod)
-│
-├── docker-compose.yml        # Bazowy plik DEV
-├── compose-linux.yml         # GUI dla Linuksa (DEV)
-├── compose-windows.yml       # GUI dla Windows (DEV)
-│
-├── docker-compose.prod.yml   # Bazowy plik PROD
-├── compose-prod-linux.yml    # GUI dla Linuksa (PROD)
-├── compose-prod-windows.yml  # GUI dla Windows (PROD)
-│
-├── README.md
-└── src/
-    ├── CMakeLists.txt
-    ├── config.h.in
-    ├── main.cpp
-    └── build/                # Ignorowany przez Git
-```
-
----
-
-## 🎓 5. Jak uruchomić gotową aplikację (Dla prowadzącego)
-
-Sekcja dla użytkownika końcowego, który chce **uruchomić aplikację bez kompilacji**.
-
----
-
-### Wymagania
-
-* **Docker Desktop** (Windows/Mac) lub **Docker** (Linux)
-* (Windows) Uruchomiony **VcXsrv** z opcją *Disable access control*
-
----
-
-### 🔹 Uruchomienie aplikacji
-
-W terminalu (PowerShell/Bash) wklej komendę odpowiednią dla systemu.
-Docker sam pobierze obraz i uruchomi aplikację.
-
-> ⚠️ Prawidłowy tag obrazu znajdziesz w opisie najnowszego **Release** na GitHubie.
-
-#### Linux
-
-```bash
-docker run -it --rm \
-    -e DISPLAY=$DISPLAY \
-    -v /tmp/.X11-unix:/tmp/.X11-unix \
-    twojanazwa/image-to-3d:latest
-```
-
-#### Windows
-
-```bash
-docker run -it --rm \
-    -e DISPLAY=host.docker.internal:0.0 \
-    twojanazwa/image-to-3d:latest
-```
-
-Po kilku sekundach aplikacja powinna pojawić się na ekranie. 🎉
-
----
+## 👥 Autorzy
+Jakub Jasiński, Kamil Pojedynek, Kacper Ulanowski
+All rights reserved © 2025.
