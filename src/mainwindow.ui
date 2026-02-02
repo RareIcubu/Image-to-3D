@@ -206,7 +206,6 @@
     <property name="title">
      <string>&amp;Plik</string>
     </property>
-    <addaction name="actionPreferencje"/>
    </widget>
    <widget class="QMenu" name="menu_Widok">
     <property name="title">
@@ -231,11 +230,6 @@
   <action name="actionO_programie">
    <property name="text">
     <string>&amp;O programie</string>
-   </property>
-  </action>
-  <action name="actionPreferencje">
-   <property name="text">
-    <string>Preferencje</string>
    </property>
   </action>
  </widget>
