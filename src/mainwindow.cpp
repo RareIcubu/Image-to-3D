@@ -1,185 +1,398 @@
 #include "mainwindow.h"
-
+#include "Theme.h"
+#include "SettingsDialog.h"
+#include <QAction>
 #include "ui_mainwindow.h"
+#include "config.h"
 
-// Dołącz potrzebne klasy
 #include <QFileDialog>
 #include <QFileSystemModel>
-#include <QStringList>
-#include <QGraphicsScene>       // <-- DODAJ
-#include <QGraphicsPixmapItem>  // <-- DODAJ
-#include <QPixmap>
-#include <QWheelEvent>
 #include <QMessageBox>
-
-#include "config.h"
+#include <QGraphicsScene>
+#include <QGraphicsPixmapItem>
+#include <QWheelEvent>
+#include <QDateTime>
+#include <QDebug>
+#include <QQmlContext>
+#include <QQmlEngine>
+#include <QQuickItem>
+#include <QProcess>
+#include <QDirIterator>
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
     , ui(new Ui::MainWindow)
-    , m_dirModel(new QFileSystemModel(this)) // Zainicjuj JEDEN model
+    , m_dirModel(new QFileSystemModel(this))
+    , m_colmapManager(new ColmapReconstructionManager())
+    , m_workerThread(new QThread(this))
+    , m_onnxManager(new OnnxReconstructionManager())
+    , m_aiThread(new QThread(this))
     , m_scene(new QGraphicsScene(this))
     , m_pixmapItem(new QGraphicsPixmapItem())
 {
     ui->setupUi(this);
 
-    ui->menu_Widok->addAction(ui->inputDockWidget->toggleViewAction());
-    ui->menu_Widok->addAction(ui->logDockWidget->toggleViewAction());
+    setup3DView();
 
-    // --- Ustawienia modelu ---
+    if (ui->menu_Widok) {
+        ui->menu_Widok->addAction(ui->inputDockWidget->toggleViewAction());
+        ui->menu_Widok->addAction(ui->logDockWidget->toggleViewAction());
+    }
+    
+    // Ustawienia w menu
+    m_actionSettings = new QAction("Preferencje...", this);
+    connect(m_actionSettings, &QAction::triggered, this, &MainWindow::on_actionUstawienia_triggered);
+    if (ui->menuPlik) {
+        ui->menuPlik->addAction(m_actionSettings);
+    }
 
-    // 1. Ustaw filtr QDir (co ma wczytywać z dysku)
     m_dirModel->setFilter(QDir::NoDotAndDotDot | QDir::AllDirs | QDir::Files);
-
-    // 2. Ustaw filtr nazw (ignoruje wielkość liter)
     m_dirModel->setNameFilters(QStringList() << "*.jpg" << "*.jpeg" << "*.png");
-
-    // 3. TO JEST KLUCZ:
-    // Mówi modelowi, aby UKRYWAŁ pliki, a nie je "wyszarzał".
     m_dirModel->setNameFilterDisables(false);
-
-    // --- Ustawienia widoku ---
-    ui->treeView->setModel(m_dirModel); // Podłącz model do widoku
-
-    // Ukryj niepotrzebne kolumny
-    ui->treeView->hideColumn(1); // Rozmiar
-    ui->treeView->hideColumn(2); // Typ
-    ui->treeView->hideColumn(3); // Data
-
-    ui->progressBar->hide();
-    ui->progressBar->setRange(0, 0); // Ustaw na "spinner"
-
-    // 4. TO JEST DRUGI KLUCZ:
-    // Ustaw ścieżkę startową na folder, w którym JEST KOD (/app),
-    // a nie na pusty folder domowy (/home/devuser).
+    ui->treeView->setModel(m_dirModel);
+    for (int i = 1; i < 4; ++i) ui->treeView->hideColumn(i);
     ui->treeView->setRootIndex(m_dirModel->setRootPath("/app"));
 
+    connect(m_dirModel, &QFileSystemModel::directoryLoaded, this, &MainWindow::onModelLoaded);
 
     m_scene->addItem(m_pixmapItem);
-
-    // 2. Powiedz 'graphicsView_3' z .ui, żeby patrzył na naszą scenę
     ui->graphicsView_3->setScene(m_scene);
-
-    // 3. (Opcjonalnie) Ustaw tryb przeciągania myszką
-    //    Teraz możesz przesuwać obrazek wciśniętą rolką lub lewym przyciskiem
     ui->graphicsView_3->setDragMode(QGraphicsView::ScrollHandDrag);
+    ui->graphicsView_3->setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
     ui->graphicsView_3->setResizeAnchor(QGraphicsView::AnchorUnderMouse);
+    ui->graphicsView_3->setRenderHint(QPainter::Antialiasing);
     ui->graphicsView_3->installEventFilter(this);
 
-    // 4. (Opcjonalnie) Dodaj lepsze renderowanie
-    ui->graphicsView_3->setRenderHint(QPainter::Antialiasing);
-    ui->graphicsView_3->setRenderHint(QPainter::SmoothPixmapTransform);
+    refreshModelList();
 
+    ui->textEdit->setReadOnly(true);
+    appendLog("--- Gotowy do pracy ---");
 
-    // Połącz sygnał ładowania z naszym slotem
-    connect(m_dirModel, &QFileSystemModel::directoryLoaded,
-            this, &MainWindow::onModelLoaded);
+    // --- Colmap Thread ---
+    m_colmapManager->moveToThread(m_workerThread);
+    connect(this, &MainWindow::startColmap, m_colmapManager, &ColmapReconstructionManager::startReconstruction);
+    connect(this, &MainWindow::requestCancel, m_colmapManager, &ColmapReconstructionManager::cancel);
+    connect(m_colmapManager, &ColmapReconstructionManager::progressUpdated, this, &MainWindow::onProgressUpdated);
+    connect(m_colmapManager, &ColmapReconstructionManager::finished, this, &MainWindow::onReconstructionFinished);
+    connect(m_colmapManager, &ColmapReconstructionManager::errorOccurred, this, &MainWindow::onErrorOccurred);
+    connect(m_workerThread, &QThread::finished, m_colmapManager, &QObject::deleteLater);
+    m_workerThread->start();
 
+    // --- ONNX AI Thread ---
+    m_onnxManager->moveToThread(m_aiThread);
+    connect(this, &MainWindow::startOnnx, m_onnxManager, &OnnxReconstructionManager::startReconstruction);
+    connect(this, &MainWindow::requestCancel, m_onnxManager, &OnnxReconstructionManager::cancel);
+    connect(m_onnxManager, &OnnxReconstructionManager::progressUpdated, this, &MainWindow::onProgressUpdated);
+    connect(m_onnxManager, &OnnxReconstructionManager::finished, this, &MainWindow::onReconstructionFinished);
+    connect(m_onnxManager, &OnnxReconstructionManager::errorOccurred, this, &MainWindow::onErrorOccurred);
+    connect(m_aiThread, &QThread::finished, m_onnxManager, &QObject::deleteLater);
+    m_aiThread->start();
+
+    // === DARK MODE ===
+    m_actionToggleTheme = new QAction(tr("Włącz tryb jasny"), this);
+    m_actionToggleTheme->setCheckable(false);
+    connect(m_actionToggleTheme, &QAction::triggered, this, &MainWindow::toggleTheme);
+
+    if (ui->menu_Widok) {
+        ui->menu_Widok->addSeparator();
+        ui->menu_Widok->addAction(m_actionToggleTheme);
+    }
+    
+    // Dodanie akcji "Otwórz Model" do menu Plik (zastępuje usunięty przycisk)
+    QAction *actionOpen = new QAction("Otwórz model 3D...", this);
+    connect(actionOpen, &QAction::triggered, this, &MainWindow::on_actionOpenModel_triggered);
+    if (ui->menuPlik) ui->menuPlik->insertAction(m_actionSettings, actionOpen);
+
+    updateStatusLabel();
 }
 
 MainWindow::~MainWindow()
 {
+    m_workerThread->quit();
+    m_workerThread->wait();
+    m_aiThread->quit();
+    m_aiThread->wait();
     delete ui;
+}
+
+void MainWindow::updateStatusLabel()
+{
+    QString quality = SettingsDialog::getQuality();
+    bool gpu = SettingsDialog::isGpuAvailable();
+    bool mvs = SettingsDialog::isMvsEnabled();
+    
+    QString status = QString("Jakość: <b>%1</b> | GPU: <b>%2</b> | MVS: <b>%3</b>")
+                     .arg(quality)
+                     .arg(gpu ? "<span style='color:lightgreen'>Aktywne</span>" : "<span style='color:orange'>Brak (CPU)</span>")
+                     .arg(mvs ? "Tak" : "Nie");
+    
+    ui->lblCurrentSettings->setText(status);
+}
+
+void MainWindow::setup3DView()
+{
+    QQuickWidget *view = ui->view3DWidget;
+    QQmlEngine *engine = view->engine();
+    engine->addImportPath("/usr/lib/x86_64-linux-gnu/qt6/qml");
+
+    view->setResizeMode(QQuickWidget::SizeRootObjectToView);
+    view->setSource(QUrl::fromLocalFile("viewer.qml"));
+    view->setFocusPolicy(Qt::StrongFocus);
+    view->setAttribute(Qt::WA_Hover);
+    view->setFocus();
+    
+    if (view->status() == QQuickWidget::Error) {
+        for (const auto &error : view->errors()) qDebug() << error.toString();
+    }
+}
+
+void MainWindow::toggleTheme()
+{
+    m_darkMode = !m_darkMode;
+    if (m_darkMode) {
+        Theme::applyDarkPalette(*qobject_cast<QApplication*>(QApplication::instance()));
+        if (m_actionToggleTheme) m_actionToggleTheme->setText(tr("Włącz tryb jasny"));
+    } else {
+        Theme::applyLightPalette(*qobject_cast<QApplication*>(QApplication::instance()));
+        if (m_actionToggleTheme) m_actionToggleTheme->setText(tr("Włącz tryb ciemny"));
+    }
+    qApp->processEvents();
+}
+
+void MainWindow::appendLog(const QString &message)
+{
+    QString timestamp = QDateTime::currentDateTime().toString("[HH:mm:ss] ");
+    ui->textEdit->append(timestamp + message);
+    QTextCursor c = ui->textEdit->textCursor();
+    c.movePosition(QTextCursor::End);
+    ui->textEdit->setTextCursor(c);
 }
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
-    // Sprawdź, czy zdarzenie pochodzi z naszego graphicsView_3
-    if (watched == ui->graphicsView_3)
-    {
-        // Sprawdź, czy zdarzenie to kółko myszy
-        if (event->type() == QEvent::Wheel)
-        {
-            // Rzutuj zdarzenie na QWheelEvent
-            QWheelEvent *wheelEvent = static_cast<QWheelEvent*>(event);
-
-            // Ustaw współczynnik zoomu
-            double scaleFactor = 1.15;
-
-            if (wheelEvent->angleDelta().y() > 0) {
-                // Kręcenie kółkiem w górę (do siebie) - Zoom In
-                ui->graphicsView_3->scale(scaleFactor, scaleFactor);
-            } else {
-                // Kręcenie kółkiem w dół (od siebie) - Zoom Out
-                ui->graphicsView_3->scale(1.0 / scaleFactor, 1.0 / scaleFactor);
-            }
-
-            // Zjedliśmy to zdarzenie - nie puszczaj go dalej
-            return true;
-        }
+    if (watched == ui->graphicsView_3 && event->type() == QEvent::Wheel) {
+        QWheelEvent *we = static_cast<QWheelEvent*>(event);
+        double scale = (we->angleDelta().y() > 0) ? 1.15 : (1.0 / 1.15);
+        ui->graphicsView_3->scale(scale, scale);
+        return true;
     }
-
-    // Przekaż wszystkie inne zdarzenia (jak kliknięcia itp.)
-    // do domyślnej obsługi
     return QMainWindow::eventFilter(watched, event);
 }
 
-
 void MainWindow::on_DirectoryButton_clicked()
 {
-    // Użyj ostatnio wybranej ścieżki jako startowej, zamiast homePath
     QString startPath = m_dirModel->rootPath();
-
-    QString dirPath = QFileDialog::getExistingDirectory(this,
-                                                        tr("Wybierz folder"),
-                                                        startPath);
-    if (dirPath.isEmpty()) {
-        return;
+    QString dirPath = QFileDialog::getExistingDirectory(this, tr("Wybierz folder"), startPath);
+    if (!dirPath.isEmpty()) {
+        m_selectedDirectory = dirPath;
+        ui->treeView->setRootIndex(m_dirModel->setRootPath(dirPath));
+        appendLog("Wybrano folder: " + dirPath);
     }
-
-    ui->progressBar->show();
-    ui->treeView->setRootIndex(m_dirModel->setRootPath(dirPath));
 }
 
-void MainWindow::onModelLoaded()
-{
-    ui->progressBar->hide();
-}
+void MainWindow::onModelLoaded() { ui->progressBar->hide(); }
 
 void MainWindow::on_treeView_clicked(const QModelIndex &index)
 {
-    // (Jeśli masz proxy, tu musi być mapowanie na sourceIndex)
+    QString path = m_dirModel->filePath(index);
 
-    // 1. Sprawdź, czy to plik, a nie folder
     if (m_dirModel->isDir(index)) {
-        // Czyść stary obrazek, jeśli kliknięto na folder
-        m_pixmapItem->setPixmap(QPixmap());
-        m_scene->setSceneRect(m_scene->itemsBoundingRect()); // Zresetuj widok
+        // Nowa logika: Kliknięcie folderu wybiera go jako wejście
+        m_selectedDirectory = path;
+        appendLog("Wybrano folder źródłowy: " + path);
+        
+        // Opcjonalnie: Zliczamy zdjęcia, żeby dać feedback
+        QDir dir(path);
+        QStringList filters; filters << "*.jpg" << "*.jpeg" << "*.png";
+        int count = dir.entryList(filters, QDir::Files).count();
+        statusBar()->showMessage(QString("Znaleziono %1 zdjęć w: %2").arg(count).arg(dir.dirName()), 3000);
         return;
     }
 
-    // 2. Pobierz pełną ścieżkę do pliku z modelu
-    QString filePath = m_dirModel->filePath(index);
+    // Stara logika: Podgląd pliku
+    QPixmap pixmap(path);
+    if (!pixmap.isNull()) {
+        m_pixmapItem->setPixmap(pixmap);
+        ui->graphicsView_3->fitInView(m_pixmapItem, Qt::KeepAspectRatio);
+    }
+}
 
-    // 3. Wczytaj obraz do obiektu QPixmap
-    QPixmap pixmap(filePath);
+void MainWindow::on_actionUstawienia_triggered()
+{
+    SettingsDialog dlg(this);
+    if (dlg.exec() == QDialog::Accepted) {
+        updateStatusLabel(); // Odśwież status po zmianie ustawień
+    }
+}
 
-    // 4. Sprawdź, czy obraz wczytał się poprawnie
-    if (pixmap.isNull()) {
-        m_pixmapItem->setPixmap(QPixmap()); // Czyść w razie błędu
-        m_scene->setSceneRect(m_scene->itemsBoundingRect());
+void MainWindow::resetUiState()
+{
+    m_isProcessing = false;
+    ui->pushButton_2->setText("START");
+    ui->pushButton_2->setStyleSheet(""); // Domyślny styl
+    ui->progressBar->hide();
+}
+
+void MainWindow::on_pushButton_2_clicked()
+{
+    if (m_isProcessing) {
+        // --- LOGIKA STOP ---
+        if (QMessageBox::question(this, "Anuluj", "Czy na pewno chcesz przerwać przetwarzanie?", 
+            QMessageBox::Yes|QMessageBox::No) == QMessageBox::Yes) 
+        {
+            emit requestCancel();
+            appendLog("--- PRZERWANO PRZEZ UŻYTKOWNIKA ---");
+            resetUiState();
+        }
         return;
     }
 
-    // 5. Zamiast ustawiać QLabel, podmień obrazek w naszym QGraphicsPixmapItem
-    m_pixmapItem->setPixmap(pixmap);
+    // --- LOGIKA START ---
+    if (m_selectedDirectory.isEmpty()) {
+        QMessageBox::warning(this, "Błąd", "Najpierw wybierz folder ze zdjęciami!");
+        return;
+    }
 
-    // 6. KLUCZOWY KROK: Powiedz widokowi, żeby automatycznie
-    //    dopasował zoom i pokazał cały obrazek
-    ui->graphicsView_3->fitInView(m_pixmapItem, Qt::KeepAspectRatio);
+    QDir imgDir(m_selectedDirectory);
+    if (imgDir.entryList(QStringList() << "*.jpg" << "*.png", QDir::Files).isEmpty()) {
+        QMessageBox::warning(this, "Brak zdjęć", "W wybranym folderze nie ma plików graficznych.");
+        return;
+    }
 
+    // Ustaw flagę
+    m_isProcessing = true;
+    ui->pushButton_2->setText("STOP");
+    ui->pushButton_2->setStyleSheet("background-color: #d9534f; color: white; font-weight: bold;"); // Czerwony dla STOP
+
+    ui->textEdit->clear();
+    appendLog("--- START PROCESU ---");
+    ui->progressBar->setRange(0, 0);
+    ui->progressBar->show();
+
+    QString selection = ui->comboBox_4->currentData().toString();
+    
+    // Sprawdź domyślny output z ustawień
+    QString defaultOutputBase = SettingsDialog::getDefaultOutputPath();
+    QString folderName = imgDir.dirName();
+    QString suffix = (selection == "colmap") ? "_workspace" : "_ai_workspace";
+    
+    // Jeśli użytkownik nie ustawił domyślnej ścieżki, używamy struktury obok folderu wejściowego (stare zachowanie)
+    // Ale SettingsDialog zwraca Documents jeśli puste, więc zawsze coś jest.
+    // Zróbmy tak: Jeśli defaultOutputBase to /app/Documents (kontener), to ok.
+    // Ale w SettingsDialog domyślnie jest DocumentsLocation.
+    
+    QString outputDir = QDir(defaultOutputBase).filePath(folderName + suffix);
+
+    if (selection == "colmap") {
+        appendLog("Metoda: Fotogrametria (COLMAP)");
+        updateStatusLabel(); // Log current config too
+        appendLog("Konfiguracja: " + ui->lblCurrentSettings->text().remove(QRegularExpression("<[^>]*>"))); // Remove HTML tags for log
+        emit startColmap(m_selectedDirectory, outputDir);
+    } else {
+        appendLog("Metoda: AI (" + QFileInfo(selection).fileName() + ")");
+        QMetaObject::invokeMethod(m_onnxManager, "setModelPath", Qt::QueuedConnection, Q_ARG(QString, selection));
+        emit startOnnx(m_selectedDirectory, outputDir);
+    }
+}
+
+void MainWindow::onProgressUpdated(QString msg, int percentage)
+{
+    if (!msg.trimmed().isEmpty()) appendLog(msg.trimmed());
+    if (percentage < 0) return;
+    if (ui->progressBar->maximum() == 0) ui->progressBar->setRange(0, 100);
+    ui->progressBar->setValue(percentage);
+}
+
+void MainWindow::onReconstructionFinished(QString modelPath)
+{
+    resetUiState();
+    appendLog("--- SUKCES ---");
+    QMessageBox::information(this, "Gotowe", "Model 3D został utworzony:\n" + modelPath);
+
+    // PLY ładujemy bezpośrednio (przez PointCloudGeometry), inne natywnie lub przez Assimp (w on_actionOpen...)
+    // Tutaj zakładamy, że modelPath jest PLY lub OBJ (z rekonstrukcji).
+    
+    QUrl fileUrl = QUrl::fromLocalFile(modelPath);
+    QQuickItem *rootObject = ui->view3DWidget->rootObject();
+    if (rootObject) {
+         appendLog("Wywołuję loadModel w QML: " + fileUrl.toString());
+         QMetaObject::invokeMethod(rootObject, "loadModel", Q_ARG(QVariant, fileUrl.toString()));
+    } else {
+         appendLog("Błąd: rootObject QML jest null!");
+    }
+}
+
+void MainWindow::onErrorOccurred(QString message)
+{
+    resetUiState();
+    appendLog("!!! BŁĄD: " + message);
+    if (!message.contains("anulowany")) { // Nie pokazuj popupu przy ręcznym anulowaniu
+        QMessageBox::critical(this, "Błąd", message);
+    }
 }
 
 void MainWindow::on_actionO_programie_triggered()
 {
-    // Używamy standardowego okna dialogowego "About"
-    QMessageBox::about(this, // Rodzic (to okno)
-                       tr("O programie ImageTo3D"), // Tytuł okna
-                       tr("<h3>ImageTo3D Konwerter</h3>" // Tekst (można używać HTML)
-                          "<p>Projekt na przedmiot Grafika i GUI.</p>"
-                          "<p><b>Wersja:</b> %1</p>" // Użyjemy %1 jako "placeholder"
-                          "<p>Autorzy: Jakub Jasiński, Kamil Pojedynek, Kacper Ulanowski</p>")
-                           .arg(PROJECT_VERSION) // Wstaw wersję z config.h w miejsce %1
-                       );
+    QMessageBox::about(this, "O programie", "ImageTo3D\nWersja: " PROJECT_VERSION);
 }
 
+void MainWindow::refreshModelList()
+{
+    ui->comboBox_4->clear();
+    ui->comboBox_4->addItem("Fotogrametria (COLMAP)", "colmap");
+    QString modelsPath = QCoreApplication::applicationDirPath() + "/models";
+    QDir dir(modelsPath);
+    QStringList filters; filters << "*.onnx";
+    QFileInfoList files = dir.entryInfoList(filters, QDir::Files);
+    for (const QFileInfo &fi : files) {
+        ui->comboBox_4->addItem("AI: " + fi.fileName(), fi.absoluteFilePath());
+    }
+}
+
+void MainWindow::on_actionOpenModel_triggered()
+{
+    QString fileName = QFileDialog::getOpenFileName(this,
+                                                    tr("Open 3D Model"),
+                                                    QDir::homePath(),
+                                                    tr("3D Files (*.obj *.ply *.fbx *.glb *.gltf *.stl *.dae *.3ds);;All Files (*)"));
+
+    if (fileName.isEmpty()) return;
+
+    QString finalPath = fileName;
+    QFileInfo fi(fileName);
+    QString ext = fi.suffix().toLower();
+
+    // Jeśli to format, którego QtQuick3D nie obsługuje (np. FBX, DAE, 3DS), próbujemy Assimpem.
+    // PLY obsługujemy natywnie przez PointCloudGeometry (fake mesh).
+    // GLB, GLTF, OBJ, STL są natywne.
+    if (ext != "ply" && ext != "glb" && ext != "gltf" && ext != "obj" && ext != "stl") {
+        appendLog("Konwersja modelu " + ext + " do GLB (dla podglądu)...");
+        
+        QString outputDir = QDir::tempPath() + "/qt_model_conversion";
+        QDir().mkpath(outputDir);
+        QString timestamp = QString::number(QDateTime::currentMSecsSinceEpoch());
+        QString outputFile = outputDir + "/model_" + timestamp + ".glb";
+
+        QProcess converter;
+        converter.start("assimp", QStringList() << "export" << fileName << outputFile << "glb2");
+        converter.waitForFinished(); 
+
+        if (converter.exitCode() == 0 && QFile::exists(outputFile)) {
+             finalPath = outputFile;
+             appendLog("Skonwertowano pomyślnie.");
+        } else {
+             appendLog("Błąd konwersji (assimp). Kod: " + QString::number(converter.exitCode()));
+        }
+    }
+
+    QUrl fileUrl = QUrl::fromLocalFile(finalPath);
+    QQuickItem *rootObject = ui->view3DWidget->rootObject();
+
+    if (rootObject) {
+        ui->view3DWidget->setFocus();
+        appendLog("Ręczne ładowanie: " + fileUrl.toString());
+        QMetaObject::invokeMethod(rootObject, "loadModel", Q_ARG(QVariant, fileUrl.toString()));
+    } else {
+        appendLog("Błąd: rootObject QML jest null przy ręcznym otwieraniu!");
+    }
+}

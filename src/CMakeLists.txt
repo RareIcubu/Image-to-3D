@@ -1,53 +1,89 @@
-# Wymagana minimalna wersja CMake
 cmake_minimum_required(VERSION 3.16)
 
-file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/version.txt" APP_VERSION)
-string(STRIP "${APP_VERSION}" APP_VERSION)
 
-# Ustaw nazwę projektu, wersję (jak w README) i języki
-project(ImageTo3D
-    VERSION ${APP_VERSION}
-        DESCRIPTION "2D Image to 3D Converter"
-        LANGUAGES CXX)
+project(ImageTo3D VERSION 1.0.0 LANGUAGES CXX)
 
-# Standard dla C++
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Automatyczne ułatwienia dla Qt (automatyczne moc, rcc, ui)
-set(CMAKE_AUTOMOC ON)
-set(CMAKE_AUTORCC ON)
-set(CMAKE_AUTOUIC ON)
+if(POLICY CMP0072)
+    cmake_policy(SET CMP0072 NEW)
+endif()
 
-# Znajdź pakiet Qt6 i jego komponent 'Widgets' (do okienek)
-find_package(Qt6 COMPONENTS Widgets REQUIRED)
+find_package(Open3D REQUIRED)
 
-# Znajdź pakiet OpenCV (dodajemy od razu, przyda się później)
+# --- 1. ZALEŻNOŚCI (Quick3D, nie Qt3D!) ---
+find_package(Qt6 REQUIRED COMPONENTS 
+    Widgets 
+    Core5Compat 
+    Quick 
+    Quick3D        # <--- To jest nowoczesny silnik
+    QuickWidgets   # <--- Z "s" na końcu!
+)
 find_package(OpenCV REQUIRED)
 
-# --- Plik konfiguracyjny dla wersji (jak w README) ---
-include(GenerateExportHeader)
+find_library(ONNX_LIB NAMES onnxruntime PATHS /usr/local/lib REQUIRED)
+include_directories(/usr/local/include)
+
 configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/config.h.in"
     "${CMAKE_CURRENT_BINARY_DIR}/config.h"
 )
-# ---------------------------------------------------
+include_directories(${CMAKE_CURRENT_BINARY_DIR})
 
-# Dodaj plik wykonywalny (nazwa 'ImageTo3D' z pliku 'main.cpp')
+file(CREATE_LINK
+    "${CMAKE_CURRENT_SOURCE_DIR}/models"
+    "${CMAKE_CURRENT_BINARY_DIR}/models"
+    SYMBOLIC
+)
+
+set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTOUIC ON)
+set(CMAKE_AUTORCC ON)
+
 add_executable(ImageTo3D
     main.cpp
     mainwindow.cpp
     mainwindow.h
     mainwindow.ui
+    IReconstructionManager.h
+    ColmapReconstructionManager.cpp
+    ColmapReconstructionManager.h
+    OnnxReconstructionManager.cpp
+    OnnxReconstructionManager.h
+    SettingsDialog.cpp
+    SettingsDialog.h
+    SettingsDialog.ui
+    viewer.qml
+    Theme.cpp
+    Theme.h
+    SystemChecks.cpp
+    SystemChecks.h
+    PointCloudGeometry.cpp
+    PointCloudGeometry.h
+    # --- ADD THESE LINES ---
+    MeshGenerator.cpp
+    MeshGenerator.h
+    # -----------------------
+    config.h.in
 )
 
-# Dołącz folder 'build', aby program znalazł config.h
-target_include_directories(ImageTo3D PUBLIC 
-    "${CMAKE_CURRENT_BINARY_DIR}"
-)
-
-# Podlinkuj biblioteki Qt i OpenCV do swojego programu
+# --- 2. LINKOWANIE (Quick3D) ---
 target_link_libraries(ImageTo3D PRIVATE
     Qt6::Widgets
-    ${OpenCV_LIBS} # Linkuje wszystkie znalezione moduły OpenCV
+    Qt6::Core5Compat
+    ${OpenCV_LIBS}
+    Qt6::Quick
+    Qt6::Quick3D       # <--- Silnik 3D
+    Qt6::QuickWidgets  # <--- Integracja z QWidgets
+    ${ONNX_LIB}
+    Open3D::Open3D
 )
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/viewer.qml"
+    "${CMAKE_CURRENT_BINARY_DIR}/viewer.qml"
+    COPYONLY
+)
+
+file(COPY "${CMAKE_CURRENT_SOURCE_DIR}/shaders" DESTINATION "${CMAKE_CURRENT_BINARY_DIR}")

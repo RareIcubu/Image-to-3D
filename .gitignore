@@ -1,22 +1,33 @@
-# Pliki generowane przez system
-.DS_Store
-*.swp
+# 1. STRATEGIA WHITELIST (Ignoruj wszystko w głównym folderze...)
+/*
 
-# Pliki generowane przez IDE
+# 2. WYJĄTKI (Czego NIE ignorować w głównym folderze)
+!/.gitignore
+!/README.md
+!/Dockerfile
+!/docker-compose*.yml
+!/compose*.yml
+
+# 3. KOD ŹRÓDŁOWY (Nie ignoruj folderu src)
+!/src/
+
+# 4. WYJĄTKI WEWNĄTRZ SRC (Co ignorować w środku src)
+# Ignoruj folder budowania (gdzie lądują śmieci kompilacji)
+src/build/
+src/cmake-build-*
+
+# Ignoruj pliki konfiguracyjne generowane przez CMake (jeśli tam są)
+src/config.h
+
+# 5. MODELE (Ignoruj zawartość, zachowaj folder)
+# Ignoruj wszystko w folderze models...
+src/models/*
+# ...ALE nie ignoruj pliku .gitkeep (to trik, żeby Git widział folder)
+!src/models/.gitkeep
+
+# 6. ŚMIECI SYSTEMOWE I IDE (Standard)
+.DS_Store
 .vscode/
 .idea/
-*.suo
 *.user
-
-# Folder 'build' z Twojego projektu C++
-# To jest NAJWAŻNIEJSZA linia!
-src/build/
-
-# Inne pliki kompilacji (na wszelki wypadek)
-*.o
-*.a
-*.so
-TwojaAplikacja # Nazwa Twojego skompilowanego programu
-
-# Pliki tymczasowe Docker (choć rzadko potrzebne)
-.dockerignore
+__pycache__/

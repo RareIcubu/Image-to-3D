@@ -1,16 +1,52 @@
-# docker-compose.yml (Baza dla DEV)
 services:
   dev:
     build:
       context: .
       dockerfile: Dockerfile
-      # Ta opcja mówi, żeby budować TYLKO etap "builder"
-      target: base 
+      target: base
       args:
         USER_ID: ${UID:-1000}
         GROUP_ID: ${GID:-1000}
-    container_name: grafika_gui_dev
-    image: grafika-gui-projekt-dev # Inna nazwa obrazu
+        PARALLEL_JOBS: ${PARALLEL_JOBS:-4}
+    container_name: imageto3d_dev
+    image: imageto3d-dev
+    privileged: true
+    ipc: host
+    network_mode: "host"
+
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_QPA_PLATFORM=xcb
+      - QT_XCB_GL_INTEGRATION=xcb_glx
+      - QSG_RHI_BACKEND=opengl
+      - QT_X11_NO_MITSHM=1
+      # Te zmienne zostawiamy - jeśli nie ma GPU, system je zignoruje, ale nie wyrzuci błędu
+      - NVIDIA_DRIVER_CAPABILITIES=all
+      - NVIDIA_VISIBLE_DEVICES=all
+
     volumes:
       - .:/app:rw
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      - ~/.cache:/home/devuser/.cache
+
+    # USUNIĘTO SEKCJĘ DEPLOY Z REZERWACJĄ GPU
+
     tty: true
+    stdin_open: true
+
+  prod:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: final
+    container_name: imageto3d_prod
+    image: imageto3d-prod
+    privileged: true
+    network_mode: "host"
+    environment:
+      - DISPLAY=${DISPLAY}
+      - QT_QPA_PLATFORM=xcb
+      - QT_XCB_GL_INTEGRATION=xcb_glx
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    # USUNIĘTO SEKCJĘ DEPLOY Z REZERWACJĄ GPU
