@@ -136,6 +136,7 @@ RUN rm -rf build && mkdir build && cd build && \
 # STAGE 5: FINAL IMAGE
 # ==========================================
 FROM base AS final
+USER root
 ENV XDG_RUNTIME_DIR=/tmp/runtime-app
 RUN mkdir -p /tmp/runtime-app && chmod 777 /tmp/runtime-app
 RUN useradd -ms /bin/bash appuser

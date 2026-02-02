@@ -24,113 +24,213 @@ Item {
         return src.endsWith(".ply") && !src.endsWith("model.ply");
     }
 
-    // --- LEWY HUD ---
+    // =========================================================
+    // LICZNIK FPS (DebugView) - PRZYWRÓCONY
+    // =========================================================
+    DebugView {
+        source: view
+        anchors.top: parent.top
+        anchors.left: parent.left
+        anchors.margins: 5
+        opacity: 0.8
+        z: 2000 // Zawsze na wierzchu
+    }
+
+    // =========================================================
+    // LEWY PANEL: INFO & KAMERA
+    // =========================================================
     Rectangle {
         id: infoPanel
         z: 1000
-        color: "#AA000000"
+        color: "#CC101010"
         width: 320
-        height: 300
+        height: 320
         anchors.bottom: parent.bottom
         anchors.left: parent.left
         anchors.margins: 10
-        radius: 5
-        border.color: view.activeFocus ? "#00FF00" : "#555"
-        border.width: 2
+        radius: 8
+        border.color: view.activeFocus ? "#00FF00" : "#444"
+        border.width: 1
 
         ColumnLayout {
             anchors.fill: parent
-            anchors.margins: 10
-            spacing: 5
-            Text { text: "INFO & KAMERA"; color: "cyan"; font.bold: true }
+            anchors.margins: 15
+            spacing: 8
+            
+            Text { text: "INFO & STEROWANIE"; color: "cyan"; font.bold: true; font.pixelSize: 14 }
             Rectangle { Layout.fillWidth: true; height: 1; color: "#555" }
 
             Text { 
-                text: "Typ: " + (root.isMesh ? "MESH" : (root.isCloud ? "CHMURA" : "BRAK"))
-                color: root.isMesh ? "lightgreen" : "yellow"
+                text: "Typ: " + (root.isMesh ? "MESH (Siatka)" : (root.isCloud ? "CHMURA PUNKTÓW" : "-"))
+                color: root.isMesh ? "#88FF88" : "#FFFF88"
                 font.pixelSize: 12
                 font.bold: true
             }
             
-            // DIAGNOSTYKA SKALI
             Text { 
-                text: "Oryginalny Rozmiar: " + debugSizeString
-                color: "white" 
-                font.pixelSize: 10 
+                text: "Rozmiar źródłowy: " + debugSizeString
+                color: "#AAAAAA" 
+                font.pixelSize: 11 
             }
             Text { 
-                text: "Auto-Mnożnik: x" + transformNode.autoScaleFactor.toFixed(2)
+                text: "Auto-Skala: x" + transformNode.autoScaleFactor.toFixed(2)
                 color: "orange" 
-                font.pixelSize: 11
+                font.pixelSize: 12
                 font.bold: true
             }
             
+            // Przycisk Auto-Fit
             Button {
-                text: "CENTRUUJ I NORMALIZUJ (Auto-Fit)"
                 Layout.fillWidth: true
-                background: Rectangle { color: "#007ACC"; radius: 3 }
-                contentItem: Text { text: parent.text; color: "white"; horizontalAlignment: Text.AlignHCenter; font.bold: true }
+                Layout.preferredHeight: 35
+                background: Rectangle { 
+                    color: parent.down ? "#005A9C" : "#007ACC"
+                    radius: 4 
+                }
+                contentItem: Text { 
+                    text: "CENTRUUJ I NORMALIZUJ"
+                    color: "white"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                    font.bold: true 
+                }
                 onClicked: { 
-                    // Wymuś przeliczenie
                     if (root.isMesh && loader.bounds) calculateAutoFit(loader.bounds);
                     else if (root.isCloud && plyModel.bounds) calculateAutoFit(plyModel.bounds);
-                    else console.log("Brak bounds do obliczeń!");
-                    
                     view.forceActiveFocus(); 
                 }
             }
             
+            // Checkbox 2D/AI
             CheckBox {
-                text: "Tryb 2D/AI (Odwróć Z)"
                 checked: root.fixBackFace
                 onCheckedChanged: {
                     root.fixBackFace = checked;
                     view.forceActiveFocus();
                 }
-                contentItem: Text { text: parent.text; color: "lightgreen"; font.bold: true; leftPadding: 30; verticalAlignment: Text.AlignVCenter }
+                indicator: Rectangle {
+                    implicitWidth: 18; implicitHeight: 18
+                    radius: 3
+                    color: parent.checked ? "#44FF44" : "#444"
+                    border.color: "#666"
+                }
+                contentItem: Text { 
+                    text: "Tryb 2D/AI (Odwróć oś Z)"
+                    color: "lightgray"
+                    font.pixelSize: 12
+                    leftPadding: 10
+                    verticalAlignment: Text.AlignVCenter 
+                }
             }
 
-            Text { text: "WASD = Latanie | Shift = Szybko"; color: "gray"; font.pixelSize: 10 }
-            Text { text: "LPM + Mysz = Rozglądanie"; color: "gray"; font.pixelSize: 10 }
+            Rectangle { Layout.fillWidth: true; height: 1; color: "#555" }
+            Text { text: "Mysz: LPM=Obrót | PPM=Przesuwanie | Scroll=Zoom"; color: "gray"; font.pixelSize: 10 }
+            Text { text: "Klawisze: WASD=Latanie | Shift=Szybko"; color: "gray"; font.pixelSize: 10 }
         }
     }
 
-    // --- PRAWY HUD ---
+    // =========================================================
+    // PRAWY PANEL: EDYCJA
+    // =========================================================
     Rectangle {
         id: transformPanel
         z: 1000
-        color: "#CC000000"
-        width: 300
-        height: parent.height - 20
+        color: "#CC101010"
+        width: 320 
+        height: parent.height - 40
         anchors.top: parent.top
         anchors.right: parent.right
-        anchors.margins: 10
-        radius: 5
+        anchors.margins: 20
+        radius: 8
         border.color: "#00AAFF"
         border.width: 1
-        ScrollView {
-            anchors.fill: parent; anchors.margins: 5; clip: true
-            ColumnLayout {
-                width: parent.width - 20; spacing: 8
-                Text { text: "EDYCJA RĘCZNA"; color: "#00AAFF"; font.bold: true; Layout.alignment: Qt.AlignHCenter }
-                
-                Text { text: "ZOOM: " + scaleSlider.value.toFixed(2) + "x"; color: "white"; font.bold: true }
-                Slider { id: scaleSlider; Layout.fillWidth: true; from: 0.01; to: 5.0; value: 1.0 } // Zmieniono zakres dla precyzji
-                
-                Text { text: "PRZESUWANIE"; color: "orange" }
-                Slider { id: posX; Layout.fillWidth: true; from: -500; to: 500; value: 0 }
-                Slider { id: posY; Layout.fillWidth: true; from: -500; to: 500; value: 0 }
-                Slider { id: posZ; Layout.fillWidth: true; from: -500; to: 500; value: 0 }
 
-                Text { text: "OBRACANIE"; color: "lightgreen" }
-                Slider { id: rotX; Layout.fillWidth: true; from: 0; to: 360; value: 0 }
-                Slider { id: rotY; Layout.fillWidth: true; from: 0; to: 360; value: 0 }
-                Slider { id: rotZ; Layout.fillWidth: true; from: 0; to: 360; value: 0 }
+        ScrollView {
+            anchors.fill: parent
+            anchors.margins: 10
+            clip: true
+
+            ColumnLayout {
+                width: parent.width - 20
+                spacing: 12
+
+                Text { 
+                    text: "EDYCJA MODELU"; color: "#00AAFF"; font.bold: true; font.pixelSize: 14; 
+                    Layout.alignment: Qt.AlignHCenter 
+                }
+                Rectangle { Layout.fillWidth: true; height: 1; color: "#555" }
+
+                // --- SKALA ---
+                Text { text: "SKALA CAŁKOWITA"; color: "white"; font.pixelSize: 11; font.bold: true }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Slider {
+                        id: scaleSlider
+                        Layout.fillWidth: true
+                        from: 0.01; to: 5.0; value: 1.0
+                    }
+                    Text { 
+                        text: scaleSlider.value.toFixed(2) + "x"
+                        color: "white"
+                        font.pixelSize: 11
+                        Layout.preferredWidth: 40
+                        horizontalAlignment: Text.AlignRight
+                    }
+                }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: "#333" }
+
+                // --- POZYCJA ---
+                Text { text: "PRZESUWANIE (Position)"; color: "orange"; font.pixelSize: 11; font.bold: true }
+                
+                RowLayout {
+                    Layout.fillWidth: true
+                    Text { text: "X"; color: "#FF4444"; font.bold: true; Layout.preferredWidth: 15 }
+                    Slider { id: posX; Layout.fillWidth: true; from: -500; to: 500; value: 0 }
+                    Text { text: posX.value.toFixed(0); color: "#FFAAAA"; Layout.preferredWidth: 35; horizontalAlignment: Text.AlignRight }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Text { text: "Y"; color: "#44FF44"; font.bold: true; Layout.preferredWidth: 15 }
+                    Slider { id: posY; Layout.fillWidth: true; from: -500; to: 500; value: 0 }
+                    Text { text: posY.value.toFixed(0); color: "#AAFFAA"; Layout.preferredWidth: 35; horizontalAlignment: Text.AlignRight }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Text { text: "Z"; color: "#4444FF"; font.bold: true; Layout.preferredWidth: 15 }
+                    Slider { id: posZ; Layout.fillWidth: true; from: -500; to: 500; value: 0 }
+                    Text { text: posZ.value.toFixed(0); color: "#AAAAFF"; Layout.preferredWidth: 35; horizontalAlignment: Text.AlignRight }
+                }
+
+                Rectangle { Layout.fillWidth: true; height: 1; color: "#333" }
+
+                // --- ROTACJA ---
+                Text { text: "OBRACANIE (Rotation)"; color: "lightgreen"; font.pixelSize: 11; font.bold: true }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Text { text: "X"; color: "#FF4444"; font.bold: true; Layout.preferredWidth: 15 }
+                    Slider { id: rotX; Layout.fillWidth: true; from: 0; to: 360; value: 0 }
+                    Text { text: rotX.value.toFixed(0) + "°"; color: "#FFAAAA"; Layout.preferredWidth: 35; horizontalAlignment: Text.AlignRight }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Text { text: "Y"; color: "#44FF44"; font.bold: true; Layout.preferredWidth: 15 }
+                    Slider { id: rotY; Layout.fillWidth: true; from: 0; to: 360; value: 0 }
+                    Text { text: rotY.value.toFixed(0) + "°"; color: "#AAFFAA"; Layout.preferredWidth: 35; horizontalAlignment: Text.AlignRight }
+                }
+                RowLayout {
+                    Layout.fillWidth: true
+                    Text { text: "Z"; color: "#4444FF"; font.bold: true; Layout.preferredWidth: 15 }
+                    Slider { id: rotZ; Layout.fillWidth: true; from: 0; to: 360; value: 0 }
+                    Text { text: rotZ.value.toFixed(0) + "°"; color: "#AAAAFF"; Layout.preferredWidth: 35; horizontalAlignment: Text.AlignRight }
+                }
 
                 Button {
                     text: "RESETUJ WIDOK"
-                    Layout.fillWidth: true; Layout.topMargin: 10
-                    background: Rectangle { color: "#882222"; radius: 3 }
+                    Layout.fillWidth: true
+                    Layout.topMargin: 20
+                    background: Rectangle { color: "#882222"; radius: 4 }
                     contentItem: Text { text: parent.text; color: "white"; horizontalAlignment: Text.AlignHCenter }
                     onClicked: {
                         blockUpdates = true;
@@ -147,6 +247,9 @@ Item {
         }
     }
 
+    // =========================================================
+    // SCENA 3D
+    // =========================================================
     View3D {
         id: view
         anchors.fill: parent
@@ -159,7 +262,6 @@ Item {
             antialiasingQuality: SceneEnvironment.High
         }
 
-        // Kamera startowa - trochę dalej
         PerspectiveCamera { id: camera; z: 400; y: 0; clipNear: 1.0; clipFar: 20000.0 }
         
         DirectionalLight { eulerRotation.x: -30; eulerRotation.y: -30; brightness: 1.2; castsShadow: false }
@@ -188,13 +290,12 @@ Item {
                 
                 onStatusChanged: {
                     if (status === RuntimeLoader.Ready && root.isMesh) {
-                        // Mały delay, czasem bounds nie są gotowe w tej samej klatce
                         fitTimer.start();
                     }
                 }
             }
 
-            // CLOUD
+            // CHMURA
             Model {
                 id: plyModel
                 visible: root.isCloud
@@ -215,7 +316,6 @@ Item {
         WasdController { controlledObject: camera; speed: 10.0; shiftSpeed: 200.0 }
     }
 
-    // Timer do opóźnionego dopasowania (Stabilność)
     Timer {
         id: fitTimer
         interval: 100
@@ -231,11 +331,9 @@ Item {
 
     function calculateAutoFit(bounds) {
         if (!bounds) return;
-        
         var bMin = bounds.minimum;
         var bMax = bounds.maximum;
         
-        // Ignoruj puste bounds (0,0,0)
         if (bMin.length() === 0 && bMax.length() === 0) return;
 
         var sizeVec = bMax.minus(bMin);
@@ -246,27 +344,22 @@ Item {
 
         if (maxDim <= 0.000001) return;
 
-        // --- KLUCZOWA ZMIANA: Docelowy rozmiar ---
-        var targetSize = 300.0; // Było 100, teraz 300 (większy obiekt)
+        var targetSize = 300.0; 
         var factor = targetSize / maxDim;
         
         transformNode.autoScaleFactor = factor;
-        console.log("QML AutoFit: Applied Factor=" + factor);
 
-        // Centrowanie
         var center = bMin.plus(bMax).times(0.5);
         if (root.isMesh) loader.position = center.times(-1);
         else plyModel.position = center.times(-1);
 
-        // Reset suwaków
         blockUpdates = true;
         scaleSlider.value = 1.0;
         posX.value = 0; posY.value = 0; posZ.value = 0;
         rotX.value = 0; rotY.value = 0; rotZ.value = 0;
         blockUpdates = false;
         
-        // Ustawienie kamery idealnie na wprost
-        camera.position = Qt.vector3d(0, 0, 500); // Odsunięcie na 500
+        camera.position = Qt.vector3d(0, 0, 500); 
         camera.lookAt(Qt.vector3d(0, 0, 0));
     }
 
