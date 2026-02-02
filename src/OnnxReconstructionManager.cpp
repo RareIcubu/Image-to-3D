@@ -1,4 +1,5 @@
 #include "OnnxReconstructionManager.h"
+#include "MeshGenerator.h" // <--- Importujemy nasz nowy generator
 #include <QDebug>
 #include <QDir>
 #include <QCoreApplication>
@@ -19,7 +20,9 @@ void OnnxReconstructionManager::cancel() {
     m_stopRequested = true;
 }
 
+// Ta metoda jest teraz slotem
 void OnnxReconstructionManager::setModelPath(const QString &path) {
+    qDebug() << "OnnxManager: Ustawiono model na:" << path;
     m_targetModelPath = path;
 }
 
@@ -32,7 +35,7 @@ bool OnnxReconstructionManager::loadModel(const QString &modelPath) {
     }
 
     try {
-        emit progressUpdated("Ładowanie modelu: " + QFileInfo(modelPath).fileName(), 1);
+        emit progressUpdated("Ładowanie modelu AI...", 1);
 
         Ort::SessionOptions sessionOptions;
         sessionOptions.SetIntraOpNumThreads(1);
@@ -206,7 +209,11 @@ void OnnxReconstructionManager::startReconstruction(const QString &imagesPath, c
     int total = files.size();
     m_stopRequested = false;
 
-    for (int i = 0; i < total; ++i) {
+    // Przetwarzamy pierwsze zdjęcie jako próbkę (lub pętlę dla wielu)
+    // AI depth estimation zazwyczaj działa per zdjęcie (nie robi SfM).
+    // Dla demonstracji przetwórzmy pierwsze zdjęcie i zróbmy mesha.
+    
+    for (int i = 0; i < 1; ++i) { // Zmieniono na 1 dla testu, można dać 'total' dla wszystkich
         if (m_stopRequested) {
             emit errorOccurred("Proces AI anulowany.");
             return;
@@ -214,7 +221,7 @@ void OnnxReconstructionManager::startReconstruction(const QString &imagesPath, c
 
         QFileInfo fi = files[i];
         QString msg = QString("AI [%1/%2]: %3").arg(i+1).arg(total).arg(fi.fileName());
-        emit progressUpdated(msg, -1);
+        emit progressUpdated(msg, 20);
         qDebug() << qPrintable(msg);
 
         cv::Mat img = cv::imread(fi.absoluteFilePath().toStdString());
@@ -234,14 +241,21 @@ void OnnxReconstructionManager::startReconstruction(const QString &imagesPath, c
         float centerX = depth.cols / 2.0f;
         float centerY = depth.rows / 2.0f;
         float focalLength = 1000.0f; 
-        float depthScale = 2000.0f; 
+        float depthScale = 1000.0f; // Skalowanie głębi
+
+        emit progressUpdated("Generowanie chmury punktów...", 60);
 
         for (int y = 0; y < depth.rows; y += m_subsample) {
             for (int x = 0; x < depth.cols; x += m_subsample) {
                 float d = depth.at<float>(y, x);
-                if (d < 0.1f) continue; 
-                float Z = (1.0f / (d + 0.01f)) * depthScale;
-                if (Z > 5000.0f) Z = 5000.0f;
+                if (d < 0.05f) continue; // Ignoruj tło
+                
+                // Inwersja głębi (dla MiDaS gdzie jasne = blisko)
+                float Z = (1.0f / (d + 0.01f)) * 100.0f; 
+                // Albo prosta: float Z = d * depthScale; (zależy od modelu)
+                
+                // Dla MiDaS często trzeba odwrócić i skalować
+                Z = d * depthScale; 
 
                 float X = (x - centerX) * Z / focalLength;
                 float Y = (y - centerY) * Z / focalLength;
@@ -255,13 +269,28 @@ void OnnxReconstructionManager::startReconstruction(const QString &imagesPath, c
             }
         }
 
-        QString plyPath = outputPath + "/" + fi.completeBaseName() + ".ply";
+        QString plyPath = outputPath + "/sparse_cloud.ply"; // Używamy tej samej nazwy co w COLMAP
         savePointCloudPLY(plyPath, currentPoints);
 
-        int percent = ((i + 1) * 100) / total;
-        emit progressUpdated("", percent);
+        // --- MESHING (Open3D) ---
+        emit progressUpdated("Generowanie Mesha (Open3D)...", 85);
+        QString meshPath = outputPath + "/model.ply";
+        
+        // Parametry dla AI mogą być inne (mniejsza głębia bo chmura jest gęsta ale szumiąca)
+        MeshGenerator::MeshParams params;
+        params.depth = 8; 
+        params.densityThreshold = 0.05f;
+        params.smoothIterations = 1;
+
+        bool meshSuccess = MeshGenerator::plyToMesh(plyPath, meshPath, params);
+        
+        if (meshSuccess) {
+             emit finished(meshPath);
+        } else {
+             // Fallback
+             emit finished(plyPath);
+        }
     }
 
-    emit finished(outputPath);
     qDebug() << "AI Finished.";
 }

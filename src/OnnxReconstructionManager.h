@@ -17,13 +17,12 @@ public:
     explicit OnnxReconstructionManager(QObject *parent = nullptr);
     ~OnnxReconstructionManager();
 
-    // Configuration
-    void setModelPath(const QString &path);
-
     // IReconstructionManager interface
     void startReconstruction(const QString &imagesPath, const QString &outputPath) override;
 
 public slots:
+    // --- FIX: To musi być SLOT, aby działało invokeMethod z innego wątku ---
+    void setModelPath(const QString &path);
     void cancel() override;
 
 private:

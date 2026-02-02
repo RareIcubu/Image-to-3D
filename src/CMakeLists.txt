@@ -1,12 +1,16 @@
 cmake_minimum_required(VERSION 3.16)
 
-file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/version.txt" APP_VERSION)
-string(STRIP "${APP_VERSION}" APP_VERSION)
 
-project(ImageTo3D VERSION ${APP_VERSION} LANGUAGES CXX)
+project(ImageTo3D VERSION 0.9.5 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+if(POLICY CMP0072)
+    cmake_policy(SET CMP0072 NEW)
+endif()
+
+find_package(Open3D REQUIRED)
 
 # --- 1. ZALEŻNOŚCI (Quick3D, nie Qt3D!) ---
 find_package(Qt6 REQUIRED COMPONENTS 
@@ -57,7 +61,10 @@ add_executable(ImageTo3D
     SystemChecks.h
     PointCloudGeometry.cpp
     PointCloudGeometry.h
-    version.txt
+    # --- ADD THESE LINES ---
+    MeshGenerator.cpp
+    MeshGenerator.h
+    # -----------------------
     config.h.in
 )
 
@@ -70,6 +77,7 @@ target_link_libraries(ImageTo3D PRIVATE
     Qt6::Quick3D       # <--- Silnik 3D
     Qt6::QuickWidgets  # <--- Integracja z QWidgets
     ${ONNX_LIB}
+    Open3D::Open3D
 )
 
 configure_file(

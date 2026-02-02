@@ -1,9 +1,0 @@
-services:
-  dev:
-    environment:
-      # Windows wymaga host.docker.internal zamiast unix socket
-      DISPLAY: host.docker.internal:0.0
-    volumes:
-      # Na Windowsie montowanie /tmp/.X11-unix często powoduje błędy permission denied
-      # Nadpisujemy listę volumes, usuwając socket X11 (bo używamy TCP na porcie 6000)
-      - .:/app:rw

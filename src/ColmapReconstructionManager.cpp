@@ -1,6 +1,7 @@
 #include "ColmapReconstructionManager.h"
 #include "SettingsDialog.h"
 #include "SystemChecks.h"
+#include "MeshGenerator.h" // <--- 1. DODANO IMPORT
 #include <QDir>
 #include <QCoreApplication>
 #include <QFile>
@@ -19,35 +20,24 @@ void ColmapReconstructionManager::startReconstruction(const QString &imagesPath,
     m_currentStep = 0;
     
     // --- KONFIGURACJA SPRZĘTOWA ---
-    // Pobieramy ustawienia BEZPOŚREDNIO z konfiguracji użytkownika
     bool useMVS = SettingsDialog::isMvsEnabled();
-    QString quality = SettingsDialog::getQuality(); // Tylko do logów
+    QString quality = SettingsDialog::getQuality();
     
-    // Automatyczna detekcja sprzętu
     m_useGpu = SystemChecks::checkCudaAvailable();
 
-    // Parametry zdefiniowane przez użytkownika
     m_maxImageSize = SettingsDialog::getMaxImageSize();
     m_numThreads = SettingsDialog::getNumThreads();
     m_maxFeatures = SettingsDialog::getMaxFeatures();
     m_useGeomConsistency = SettingsDialog::isGeomConsistencyEnabled();
     m_outputFormat = SettingsDialog::getOutputFormat();
     
-    // Fallback dla minInliers zależny od jakości (to można zostawić jako automatykę, bo mało wpływa na crash)
     m_minInliers = 15;
     if (quality == "Low") m_minInliers = 10;
     
     qDebug() << "=== START REKONSTRUKCJI ===";
-    qDebug() << "Jakość (Profil):" << quality;
-    qDebug() << "Max Image Size:" << m_maxImageSize;
-    qDebug() << "Max Features:" << m_maxFeatures;
-    qDebug() << "Wątki CPU:" << m_numThreads;
-    qDebug() << "Geom Consistency:" << m_useGeomConsistency;
-    qDebug() << "Format Wyjściowy:" << m_outputFormat;
+    qDebug() << "Jakość:" << quality << "| GPU:" << m_useGpu << "| MVS:" << useMVS;
     
     m_useFastMode = !useMVS;
-    qDebug() << "Tryb MVS (Gęsta chmura):" << useMVS;
-    qDebug() << "Akceleracja GPU:" << m_useGpu;
 
     QDir imgDir(m_imagesPath);
     QDir workDir(m_workspacePath);
@@ -90,12 +80,10 @@ void ColmapReconstructionManager::runNextStep() {
     QString colmapBinary = "colmap";
     QStringList args;
 
-    // Helper do argumentów
     auto arg = [](const QString &key, const QString &val) {
         return "--" + key + "=" + val;
     };
     
-    // Helper do flag GPU/CPU
     QString useGpuStr = m_useGpu ? "1" : "0";
 
     switch (m_currentStep) {
@@ -108,13 +96,8 @@ void ColmapReconstructionManager::runNextStep() {
              << arg("SiftExtraction.max_image_size", QString::number(m_maxImageSize))
              << arg("SiftExtraction.max_num_features", QString::number(m_maxFeatures));
              
-        if (m_numThreads > 0) {
-             args << arg("SiftExtraction.num_threads", QString::number(m_numThreads));
-        }
-        
-        if (!m_useGpu) {
-             args << arg("SiftExtraction.domain_size_pooling", "1"); // To zawsze warto mieć na CPU
-        }
+        if (m_numThreads > 0) args << arg("SiftExtraction.num_threads", QString::number(m_numThreads));
+        if (!m_useGpu) args << arg("SiftExtraction.domain_size_pooling", "1");
         break;
 
     case 1: // FEATURE MATCHING
@@ -123,9 +106,7 @@ void ColmapReconstructionManager::runNextStep() {
              << arg("database_path", m_workspacePath + "/database.db")
              << arg("SiftMatching.use_gpu", useGpuStr);
              
-        if (m_numThreads > 0) {
-             args << arg("SiftMatching.num_threads", QString::number(m_numThreads));
-        }
+        if (m_numThreads > 0) args << arg("SiftMatching.num_threads", QString::number(m_numThreads));
         break;
 
     case 2: // SPARSE RECONSTRUCTION (MAPPER)
@@ -135,26 +116,24 @@ void ColmapReconstructionManager::runNextStep() {
              << arg("database_path", m_workspacePath + "/database.db")
              << arg("image_path", m_imagesPath)
              << arg("output_path", m_workspacePath + "/sparse")
-             // Parametry "Robust" z Twojej wersji (lepsze dla turntable/wideo)
              << arg("Mapper.tri_ignore_two_view_tracks", "0")
-             << arg("Mapper.init_min_num_inliers", "10") // Tolerancyjny start
-             << arg("Mapper.init_min_tri_angle", "4");   // Lepsze dla małych kątów
+             << arg("Mapper.init_min_num_inliers", "10")
+             << arg("Mapper.init_min_tri_angle", "4");
         break;
 
-    case 3: // CONVERTER / UNDISTORTER
+    case 3: // CONVERTER (Eksport punktów)
         if (m_useFastMode) {
-            // Szybki export rzadkiej chmury - ZAWSZE PLY jako baza
+            // W trybie Fast Mode eksportujemy tylko rzadką chmurę
+            // Zostanie ona przetworzona przez Open3D po zakończeniu tego procesu
             emit progressUpdated("Eksport chmury punktów...", 90);
             args << "model_converter"
                  << arg("input_path", m_workspacePath + "/sparse/0")
-                 << arg("output_path", m_workspacePath + "/model.ply")
+                 << arg("output_path", m_workspacePath + "/sparse_cloud.ply") // Zmieniono nazwę na tymczasową
                  << arg("output_type", "PLY");
             
-            // Po zakończeniu tego kroku skoczymy do kroku 7 (Konwersja)
-            // Zamiast 99 (Koniec)
-            m_currentStep = 6; // Następny inkrement da 7
+            // UWAGA: Nie ustawiamy tutaj skoku do 6/7. Zrobimy to w obsłudze finished().
         } else {
-            // Przygotowanie pod MVS (Dense)
+            // Przygotowanie do MVS
             emit progressUpdated("Przygotowanie do MVS...", 55);
             QDir(m_workspacePath + "/dense").mkpath(".");
             args << "image_undistorter"
@@ -166,44 +145,40 @@ void ColmapReconstructionManager::runNextStep() {
         }
         break;
 
-    case 4: // DENSE STEREO (PatchMatch)
+    case 4: // DENSE STEREO
         emit progressUpdated("Obliczanie głębi (Dense Stereo)...", 70);
         args << "patch_match_stereo"
              << arg("workspace_path", m_workspacePath + "/dense")
              << arg("workspace_format", "COLMAP")
              << arg("PatchMatchStereo.geom_consistency", m_useGeomConsistency ? "true" : "false");
         
-        // Jeśli CPU, wyłączamy indeks GPU (COLMAP 3.8+ wspiera CPU dense, ale jest wolne)
-        if (!m_useGpu) {
-            args << arg("PatchMatchStereo.gpu_index", "-1"); 
-        }
+        if (!m_useGpu) args << arg("PatchMatchStereo.gpu_index", "-1"); 
         break;
 
     case 5: // FUSION
         emit progressUpdated("Tworzenie gęstej chmury (Fusion)...", 85);
         args << "stereo_fusion"
-             << arg("workspace_path", m_workspacePath + "/dense")                    
+             << arg("workspace_path", m_workspacePath + "/dense")                  
              << arg("workspace_format", "COLMAP")
              << arg("input_type", "photometric")
              << arg("output_path", m_workspacePath + "/dense/fused.ply");
         break;
 
-    case 6: // MESHING (Poisson)
+    case 6: // MESHING (Poisson - Colmap Built-in)
+        // Używane tylko w pełnym trybie MVS
         emit progressUpdated("Generowanie siatki (Meshing)...", 90);
         args << "poisson_mesher"
              << arg("input_path", m_workspacePath + "/dense/fused.ply")
              << arg("output_path", m_workspacePath + "/model.ply");
         break;
         
-    case 7: // FINAL CONVERSION (Optional)
-        // Jeśli użytkownik chciał OBJ a my mamy PLY (z Poisson Mesher), konwertujemy Assimpem
+    case 7: // FINAL CONVERSION (Assimp)
+        // <--- 2. WYCZYSZCZONO TEN KROK (Tylko konwersja Assimp) ---
         if (!m_useFastMode && m_outputFormat == "OBJ") {
              emit progressUpdated("Konwersja do OBJ...", 95);
              QString inputFile = m_workspacePath + "/model.ply";
              QString outputFile = m_workspacePath + "/model.obj";
              
-             // Używamy QProcess do odpalenia assimp
-             // Uwaga: "assimp" musi być w PATH (jest w Dockerze)
              if (m_process) m_process->deleteLater();
              m_process = new QProcess(this);
              m_process->start("assimp", QStringList() << "export" << inputFile << outputFile);
@@ -213,16 +188,14 @@ void ColmapReconstructionManager::runNextStep() {
                 if (exitCode == 0 && QFile::exists(outputFile)) {
                     emit finished(outputFile);
                 } else {
-                    // Fallback to PLY
                     emit finished(inputFile);
                 }
              });
-             return; // Ważne: wychodzimy, bo asynchroniczny process
+             return; // Wyjście, bo Assimp działa asynchronicznie
         } else {
-             // Jeśli nie trzeba konwertować, kończymy
+             // Jeśli FastMode, to wynik został już zwrócony wcześniej (w Open3D logic).
+             // Jeśli FullMode i format PLY:
              QString finalModel = m_workspacePath + "/model.ply";
-             if (m_useFastMode) finalModel = m_workspacePath + "/model." + m_outputFormat.toLower(); // Już zrobione w kroku 3
-             
              if (QFile::exists(finalModel)) emit finished(finalModel);
              else emit errorOccurred("Nie znaleziono pliku wynikowego.");
              return;
@@ -230,18 +203,14 @@ void ColmapReconstructionManager::runNextStep() {
         break;
 
     default:
-        // KONIEC (Fallback dla switcha)
         return;
     }
 
-    // --- Uruchomienie procesu (Czysty QProcess) ---
-    
+    // --- Uruchomienie procesu COLMAP ---
     if (m_process) m_process->deleteLater();
     m_process = new QProcess(this);
     m_process->setProcessChannelMode(QProcess::MergedChannels);
 
-    // Ustawiamy zmienne środowiskowe, żeby COLMAP nie buforował wyjścia
-    // To zastępuje hack z "/usr/bin/script"
     QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     env.insert("GLOG_logtostderr", "1");
     env.insert("GLOG_stderrthreshold", "0"); 
@@ -249,12 +218,10 @@ void ColmapReconstructionManager::runNextStep() {
 
     qDebug() << "Executing:" << colmapBinary << args.join(" ");
 
-    // Parsowanie wyjścia (Pasek postępu)
+    // Parsowanie wyjścia
     connect(m_process, &QProcess::readyReadStandardOutput, [this]() {
         while (m_process->canReadLine()) {
             QString line = QString::fromLocal8Bit(m_process->readLine()).trimmed();
-            
-            // Regex dla Colmapa [ 5/10]
             static QRegularExpression reProgress("\\[\\s*(\\d+)/(\\d+)\\s*\\]");
             QRegularExpressionMatch match = reProgress.match(line);
             
@@ -262,28 +229,49 @@ void ColmapReconstructionManager::runNextStep() {
                 int cur = match.captured(1).toInt();
                 int tot = match.captured(2).toInt();
                 if (tot > 0) {
-                    // Prosta kalkulacja postępu globalnego
-                    // (Można to dopracować, ale działa)
                     int stepBase = 0;
-                    if (m_currentStep == 0) stepBase = 0;       // Extraction
-                    else if (m_currentStep == 1) stepBase = 15; // Matching
-                    else if (m_currentStep == 2) stepBase = 30; // Sparse
-                    else if (m_currentStep == 4) stepBase = 60; // Dense
-                    else if (m_currentStep == 5) stepBase = 85; // Fusion
+                    if (m_currentStep == 0) stepBase = 0;
+                    else if (m_currentStep == 1) stepBase = 15;
+                    else if (m_currentStep == 2) stepBase = 30;
+                    else if (m_currentStep == 4) stepBase = 60;
+                    else if (m_currentStep == 5) stepBase = 85;
                     
-                    int pct = stepBase + (int)((float)cur/tot * 15.0f); // 15% na krok
+                    int pct = stepBase + (int)((float)cur/tot * 15.0f);
                     emit progressUpdated(line, pct);
                 }
             } else if (!line.isEmpty()) {
-               // Logowanie ważniejszych komunikatów
                if(line.contains("error", Qt::CaseInsensitive)) qDebug() << "COLMAP ERROR:" << line;
             }
         }
     });
 
+    // --- 3. KLUCZOWA ZMIANA: Obsługa zakończenia procesu i Open3D ---
     connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             [=](int exitCode, QProcess::ExitStatus) {
         if (exitCode == 0) {
+            
+            // JEŚLI TO BYŁ KROK 3 (Konwerter) W TRYBIE FAST MODE -> URUCHOM OPEN3D
+            if (m_currentStep == 3 && m_useFastMode) {
+                QString inputCloud = m_workspacePath + "/sparse_cloud.ply";
+                QString outputMesh = m_workspacePath + "/model.ply"; // Open3D zapisze jako OBJ
+
+                emit progressUpdated("Generowanie Mesha (Open3D)...", 95);
+                qDebug() << "Uruchamiam MeshGenerator::plyToMesh...";
+
+                // To jest operacja blokująca, ale Open3D jest szybki na małych chmurach.
+                // Można to przenieść do QtConcurrent::run w przyszłości.
+                MeshGenerator::MeshParams params;
+                bool success = MeshGenerator::plyToMesh(inputCloud, outputMesh, params);
+
+                if (success) {
+                    emit finished(outputMesh);
+                } else {
+                    emit errorOccurred("Nie udało się wygenerować mesha przez Open3D.");
+                }
+                return; // KOŃCZYMY TUTAJ, nie idziemy do kolejnych kroków
+            }
+            
+            // Standardowa pętla dla trybu pełnego
             if (m_currentStep == 99) m_currentStep = 100;
             else m_currentStep++;
             runNextStep();
