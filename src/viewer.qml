@@ -167,7 +167,7 @@ Item {
                     Slider {
                         id: scaleSlider
                         Layout.fillWidth: true
-                        from: 0.01; to: 5.0; value: 1.0
+                        from: 0.01; to: 100.0; value: 1.0
                     }
                     Text { 
                         text: scaleSlider.value.toFixed(2) + "x"
@@ -186,19 +186,19 @@ Item {
                 RowLayout {
                     Layout.fillWidth: true
                     Text { text: "X"; color: "#FF4444"; font.bold: true; Layout.preferredWidth: 15 }
-                    Slider { id: posX; Layout.fillWidth: true; from: -500; to: 500; value: 0 }
+                    Slider { id: posX; Layout.fillWidth: true; from: -5000; to: 5000; value: 0 }
                     Text { text: posX.value.toFixed(0); color: "#FFAAAA"; Layout.preferredWidth: 35; horizontalAlignment: Text.AlignRight }
                 }
                 RowLayout {
                     Layout.fillWidth: true
                     Text { text: "Y"; color: "#44FF44"; font.bold: true; Layout.preferredWidth: 15 }
-                    Slider { id: posY; Layout.fillWidth: true; from: -500; to: 500; value: 0 }
+                    Slider { id: posY; Layout.fillWidth: true; from: -5000; to: 5000; value: 0 }
                     Text { text: posY.value.toFixed(0); color: "#AAFFAA"; Layout.preferredWidth: 35; horizontalAlignment: Text.AlignRight }
                 }
                 RowLayout {
                     Layout.fillWidth: true
                     Text { text: "Z"; color: "#4444FF"; font.bold: true; Layout.preferredWidth: 15 }
-                    Slider { id: posZ; Layout.fillWidth: true; from: -500; to: 500; value: 0 }
+                    Slider { id: posZ; Layout.fillWidth: true; from: -5000; to: 5000; value: 0 }
                     Text { text: posZ.value.toFixed(0); color: "#AAAAFF"; Layout.preferredWidth: 35; horizontalAlignment: Text.AlignRight }
                 }
 

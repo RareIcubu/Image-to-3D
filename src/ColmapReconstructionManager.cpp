@@ -1,13 +1,17 @@
 #include "ColmapReconstructionManager.h"
 #include "SettingsDialog.h"
 #include "SystemChecks.h"
-#include "MeshGenerator.h" // <--- 1. DODANO IMPORT
+#include "MeshGenerator.h" // Używamy tego do FastMode i konwersji końcowej
 #include <QDir>
 #include <QCoreApplication>
 #include <QFile>
 #include <QRegularExpression>
 #include <QProcessEnvironment>
 #include <QDebug>
+
+// Open3D Headers (Potrzebne do konwersji PLY -> OBJ na końcu)
+#include <open3d/geometry/TriangleMesh.h>
+#include <open3d/io/TriangleMeshIO.h>
 
 ColmapReconstructionManager::ColmapReconstructionManager(QObject *parent) 
     : IReconstructionManager(parent), m_process(nullptr) 
@@ -19,7 +23,7 @@ void ColmapReconstructionManager::startReconstruction(const QString &imagesPath,
     m_workspacePath = outputDir;
     m_currentStep = 0;
     
-    // --- KONFIGURACJA SPRZĘTOWA ---
+    // --- KONFIGURACJA ---
     bool useMVS = SettingsDialog::isMvsEnabled();
     QString quality = SettingsDialog::getQuality();
     
@@ -29,12 +33,12 @@ void ColmapReconstructionManager::startReconstruction(const QString &imagesPath,
     m_numThreads = SettingsDialog::getNumThreads();
     m_maxFeatures = SettingsDialog::getMaxFeatures();
     m_useGeomConsistency = SettingsDialog::isGeomConsistencyEnabled();
-    m_outputFormat = SettingsDialog::getOutputFormat();
+    m_outputFormat = "OBJ"; 
     
     m_minInliers = 15;
     if (quality == "Low") m_minInliers = 10;
     
-    qDebug() << "=== START REKONSTRUKCJI ===";
+    qDebug() << "=== START REKONSTRUKCJI (HYBRID MODE) ===";
     qDebug() << "Jakość:" << quality << "| GPU:" << m_useGpu << "| MVS:" << useMVS;
     
     m_useFastMode = !useMVS;
@@ -123,15 +127,12 @@ void ColmapReconstructionManager::runNextStep() {
 
     case 3: // CONVERTER (Eksport punktów)
         if (m_useFastMode) {
-            // W trybie Fast Mode eksportujemy tylko rzadką chmurę
-            // Zostanie ona przetworzona przez Open3D po zakończeniu tego procesu
+            // W trybie Fast Mode eksportujemy rzadką chmurę jako PLY
             emit progressUpdated("Eksport chmury punktów...", 90);
             args << "model_converter"
                  << arg("input_path", m_workspacePath + "/sparse/0")
-                 << arg("output_path", m_workspacePath + "/sparse_cloud.ply") // Zmieniono nazwę na tymczasową
+                 << arg("output_path", m_workspacePath + "/sparse_cloud.ply") 
                  << arg("output_type", "PLY");
-            
-            // UWAGA: Nie ustawiamy tutaj skoku do 6/7. Zrobimy to w obsłudze finished().
         } else {
             // Przygotowanie do MVS
             emit progressUpdated("Przygotowanie do MVS...", 55);
@@ -158,49 +159,31 @@ void ColmapReconstructionManager::runNextStep() {
     case 5: // FUSION
         emit progressUpdated("Tworzenie gęstej chmury (Fusion)...", 85);
         args << "stereo_fusion"
-             << arg("workspace_path", m_workspacePath + "/dense")                  
+             << arg("workspace_path", m_workspacePath + "/dense")                   
              << arg("workspace_format", "COLMAP")
              << arg("input_type", "photometric")
              << arg("output_path", m_workspacePath + "/dense/fused.ply");
         break;
 
-    case 6: // MESHING (Poisson - Colmap Built-in)
-        // Używane tylko w pełnym trybie MVS
-        emit progressUpdated("Generowanie siatki (Meshing)...", 90);
-        args << "poisson_mesher"
-             << arg("input_path", m_workspacePath + "/dense/fused.ply")
-             << arg("output_path", m_workspacePath + "/model.ply");
-        break;
-        
-    case 7: // FINAL CONVERSION (Assimp)
-        // <--- 2. WYCZYSZCZONO TEN KROK (Tylko konwersja Assimp) ---
-        if (!m_useFastMode && m_outputFormat == "OBJ") {
-             emit progressUpdated("Konwersja do OBJ...", 95);
-             QString inputFile = m_workspacePath + "/model.ply";
-             QString outputFile = m_workspacePath + "/model.obj";
-             
-             if (m_process) m_process->deleteLater();
-             m_process = new QProcess(this);
-             m_process->start("assimp", QStringList() << "export" << inputFile << outputFile);
-             
-             connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
-                [=](int exitCode, QProcess::ExitStatus) {
-                if (exitCode == 0 && QFile::exists(outputFile)) {
-                    emit finished(outputFile);
-                } else {
-                    emit finished(inputFile);
-                }
-             });
-             return; // Wyjście, bo Assimp działa asynchronicznie
-        } else {
-             // Jeśli FastMode, to wynik został już zwrócony wcześniej (w Open3D logic).
-             // Jeśli FullMode i format PLY:
-             QString finalModel = m_workspacePath + "/model.ply";
-             if (QFile::exists(finalModel)) emit finished(finalModel);
-             else emit errorOccurred("Nie znaleziono pliku wynikowego.");
-             return;
+    case 6: // MESHING (HYBRID: COLMAP robi Mesha -> Open3D robi konwersję)
+        {
+            // Używamy natywnego Poisson Mesher z COLMAP
+            // Dlaczego? Bo obsługuje parametr "trim" (przycinanie bąbli)
+            emit progressUpdated("Generowanie siatki (COLMAP Native)...", 90);
+            
+            // Zapisujemy do pliku TYMCZASOWEGO .ply
+            // (Open3D potem zamieni go na .obj)
+            QString tempPly = m_workspacePath + "/temp_model.ply"; 
+            
+            args << "poisson_mesher"
+                 << arg("input_path", m_workspacePath + "/dense/fused.ply")
+                 << arg("output_path", tempPly)
+                 << arg("PoissonMeshing.trim", "10"); // <--- KLUCZOWE: Usuwa "balony" (wartość > 0)
         }
         break;
+        
+    case 7: 
+        return; // Koniec (obsłużone w finished)
 
     default:
         return;
@@ -218,7 +201,7 @@ void ColmapReconstructionManager::runNextStep() {
 
     qDebug() << "Executing:" << colmapBinary << args.join(" ");
 
-    // Parsowanie wyjścia
+    // Parsowanie Logów
     connect(m_process, &QProcess::readyReadStandardOutput, [this]() {
         while (m_process->canReadLine()) {
             QString line = QString::fromLocal8Bit(m_process->readLine()).trimmed();
@@ -230,8 +213,7 @@ void ColmapReconstructionManager::runNextStep() {
                 int tot = match.captured(2).toInt();
                 if (tot > 0) {
                     int stepBase = 0;
-                    if (m_currentStep == 0) stepBase = 0;
-                    else if (m_currentStep == 1) stepBase = 15;
+                    if (m_currentStep == 1) stepBase = 15;
                     else if (m_currentStep == 2) stepBase = 30;
                     else if (m_currentStep == 4) stepBase = 60;
                     else if (m_currentStep == 5) stepBase = 85;
@@ -245,36 +227,65 @@ void ColmapReconstructionManager::runNextStep() {
         }
     });
 
-    // --- 3. KLUCZOWA ZMIANA: Obsługa zakończenia procesu i Open3D ---
+    // --- FINISH HANDLER (Logika Hybrydowa) ---
     connect(m_process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished),
             [=](int exitCode, QProcess::ExitStatus) {
         if (exitCode == 0) {
             
-            // JEŚLI TO BYŁ KROK 3 (Konwerter) W TRYBIE FAST MODE -> URUCHOM OPEN3D
+            // --- SCENARIUSZ 1: FAST MODE (Sparse Cloud) ---
             if (m_currentStep == 3 && m_useFastMode) {
                 QString inputCloud = m_workspacePath + "/sparse_cloud.ply";
-                QString outputMesh = m_workspacePath + "/model.ply"; // Open3D zapisze jako OBJ
+                QString outputMesh = m_workspacePath + "/model.obj";
 
-                emit progressUpdated("Generowanie Mesha (Open3D)...", 95);
-                qDebug() << "Uruchamiam MeshGenerator::plyToMesh...";
-
-                // To jest operacja blokująca, ale Open3D jest szybki na małych chmurach.
-                // Można to przenieść do QtConcurrent::run w przyszłości.
+                emit progressUpdated("Generowanie Mesha (Open3D Fast)...", 95);
+                
                 MeshGenerator::MeshParams params;
+                params.depth = 8; 
+                // W FastMode używamy wbudowanego generatora, bo nie mamy dense cloud
                 bool success = MeshGenerator::plyToMesh(inputCloud, outputMesh, params);
 
-                if (success) {
-                    emit finished(outputMesh);
-                } else {
-                    emit errorOccurred("Nie udało się wygenerować mesha przez Open3D.");
-                }
-                return; // KOŃCZYMY TUTAJ, nie idziemy do kolejnych kroków
+                if (success) emit finished(outputMesh);
+                else emit errorOccurred("Nie udało się wygenerować mesha w trybie Fast.");
+                return;
             }
             
-            // Standardowa pętla dla trybu pełnego
-            if (m_currentStep == 99) m_currentStep = 100;
-            else m_currentStep++;
+            // --- SCENARIUSZ 2: HYBRID MODE (MVS / High Quality) ---
+            // Krok 6 (COLMAP Meshing) zakończony sukcesem -> Konwersja na OBJ
+            if (m_currentStep == 6) {
+                QString tempPly = m_workspacePath + "/temp_model.ply";
+                QString finalObj = m_workspacePath + "/model.obj";
+
+                if (QFile::exists(tempPly)) {
+                    emit progressUpdated("Konwersja PLY -> OBJ (Open3D)...", 98);
+                    qDebug() << "[Manager] Converting COLMAP result to OBJ for Viewer compatibility...";
+                    
+                    // Używamy Open3D jako konwertera
+                    auto mesh = std::make_shared<open3d::geometry::TriangleMesh>();
+                    
+                    if (open3d::io::ReadTriangleMesh(tempPly.toStdString(), *mesh)) {
+                        // Zapisz jako ASCII OBJ (write_ascii=true)
+                        bool ok = open3d::io::WriteTriangleMesh(finalObj.toStdString(), *mesh, true, false);
+                        
+                        if (ok) {
+                            // Usuń tymczasowy plik PLY, żeby nie śmiecić
+                            QFile::remove(tempPly);
+                            emit finished(finalObj);
+                        } else {
+                            emit errorOccurred("Błąd zapisu pliku OBJ.");
+                        }
+                    } else {
+                        emit errorOccurred("Błąd odczytu tymczasowego pliku PLY.");
+                    }
+                } else {
+                    emit errorOccurred("COLMAP nie utworzył pliku wynikowego.");
+                }
+                return; // KONIEC PROCESU
+            }
+
+            // Normalna pętla (idziemy do następnego kroku)
+            m_currentStep++;
             runNextStep();
+
         } else {
             QString err = m_process->readAllStandardOutput();
             qDebug() << "COLMAP CRASH LOG:" << err;
