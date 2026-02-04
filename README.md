@@ -76,10 +76,7 @@ Projekt wykorzystuje `docker compose` do zarządzania środowiskiem deweloperski
 Ta komenda zbuduje obraz (z bibliotekami Open3D, Qt, Colmap) i uruchomi kontener w tle.
 
 ```bash
-
 ### 2. Wejście do środowiska
-
-```bash
 docker compose exec dev bash
 ```
 
@@ -134,7 +131,6 @@ Dla szybkiego podglądu z jednego zdjęcia.
 ## 🔧 Rozwiązywanie problemów
 
 ### 🔴 `docker: Error response from daemon: could not select device driver "nvidia"`
-https://github.com/RareIcubu/Image-to-3D
 Docker nie widzi Twojej karty graficznej lub toolkita.
 
 1. Zainstaluj `nvidia-container-toolkit`.
