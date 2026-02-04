@@ -1,6 +1,6 @@
 # 📸 ImageTo3D: Konwerter Obrazu 2D do 3D
 
-> **Projekt na przedmiot: Grafika i Komunikacja Człowiek-Komputer**
+> **Projekt na przedmiot: Grafika komputerowa i GUI**
 
 Zaawansowana aplikacja desktopowa w **C++/Qt6**, umożliwiająca rekonstrukcję modeli 3D ze zdjęć przy użyciu dwóch metod: klasycznej fotogrametrii oraz sztucznej inteligencji. Całość zamknięta w kontenerze **Docker** dla zapewnienia powtarzalności środowiska.
 
@@ -134,7 +134,7 @@ Dla szybkiego podglądu z jednego zdjęcia.
 ## 🔧 Rozwiązywanie problemów
 
 ### 🔴 `docker: Error response from daemon: could not select device driver "nvidia"`
-
+https://github.com/RareIcubu/Image-to-3D
 Docker nie widzi Twojej karty graficznej lub toolkita.
 
 1. Zainstaluj `nvidia-container-toolkit`.
