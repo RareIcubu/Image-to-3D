@@ -1,5 +1,19 @@
 # 📸 ImageTo3D: Konwerter Obrazu 2D do 3D
 
+> ⚠️ **ACADEMIC WARNING / OSTRZEŻENIE AKADEMICKIE**
+>
+> **Status:** Archived University Project (January 2025)
+> 
+> **Institution:** Politechnika Wrocławska (Wrocław University of Science and Technology)
+>
+> **Authors:** Jakub Jasiński, Kamil Pojedynek, Kacper Ulanowski
+>
+> **PL:** Ten kod jest monitorowany. Wykorzystanie go w całości lub części do zaliczenia przedmiotów (Grafika Komputerowa, GUI, AI) bez wyraźnego wskazania autorstwa stanowi naruszenie zasad etyki studenckiej i regulaminu studiów.
+>
+> **EN:** This repository is tracked. Submitting this code as your own assignment constitutes plagiarism. We can see the clone traffic. 👀
+
+---
+
 > **Projekt na przedmiot: Grafika komputerowa i GUI**
 
 Zaawansowana aplikacja desktopowa w **C++/Qt6**, umożliwiająca rekonstrukcję modeli 3D ze zdjęć przy użyciu dwóch metod: klasycznej fotogrametrii oraz sztucznej inteligencji. Całość zamknięta w kontenerze **Docker** dla zapewnienia powtarzalności środowiska.
